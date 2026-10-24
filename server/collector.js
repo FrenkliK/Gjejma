@@ -203,16 +203,27 @@ function isOneTypoAway(a, b) {
   return edits + (i < a.length || j < b.length ? 1 : 0) <= 1;
 }
 
-function selectStores(query) {
+function selectStores(query, requestedCategory = '') {
   const eligible = stores.filter(store => store.enabled && store.country === 'AL');
-  const category = detectCategory(query);
-  if (!category) return { category: null, stores: eligible };
-  const groups = searchConfig.storeGroups[category] || [];
+  const filterCategory = Object.hasOwn(searchConfig.userCategories || {}, requestedCategory) ? requestedCategory : null;
+  const category = filterCategory || detectCategory(query);
+  if (!category) return { category: null, filterCategory: null, stores: eligible };
+  const groupKey = filterCategory ? searchConfig.userCategories[filterCategory].storeGroup : category;
+  const groups = searchConfig.storeGroups[groupKey] || [];
   const selected = eligible.filter(store => (store.categories || []).some(item => groups.includes(item)));
-  return { category: selected.length ? category : null, stores: selected.length ? selected : eligible };
+  return { category: selected.length ? category : null, filterCategory, stores: selected.length ? selected : eligible };
 }
 
-async function searchStore(store, query) {
+function matchesUserCategory(title, category) {
+  if (!category) return true;
+  const rule = searchConfig.userCategories?.[category];
+  if (!rule) return true;
+  const normalized = normalize(title);
+  if ((rule.exclude || []).some(term => hasPhrase(normalized, term))) return false;
+  return (rule.include || []).some(term => hasPhrase(normalized, term));
+}
+
+async function searchStore(store, query, filterCategory = null) {
   const errors = [];
   const html = (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)];
   for (const searchTerm of searchAlternatives(query)) {
@@ -236,7 +247,7 @@ async function searchStore(store, query) {
       seen.add(attempt.url);
       try {
         const body = await fetchText(attempt.url);
-        const found = attempt.parse(body, store).filter(row => queryMatches(row.title, query));
+        const found = attempt.parse(body, store).filter(row => queryMatches(row.title, query) && matchesUserCategory(row.title, filterCategory));
         if (found.length) return { offers: found, error: null };
       } catch (error) { errors.push(error.message || 'request failed'); }
     }
@@ -245,12 +256,12 @@ async function searchStore(store, query) {
   return { offers: [], error: distinct.length ? distinct.join(', ') : 'No matching public product listing found' };
 }
 
-async function searchStores(query) {
-  const plan = selectStores(query);
+async function searchStores(query, requestedCategory = '') {
+  const plan = selectStores(query, requestedCategory);
   const selected = plan.stores;
   const checkedAt = new Date().toISOString();
   const outcomes = await Promise.all(selected.map(async store => {
-    try { return { store, ...(await searchStore(store, query)) }; }
+    try { return { store, ...(await searchStore(store, query, plan.filterCategory)) }; }
     catch (error) { return { store, offers: [], error: error.message || 'request failed' }; }
   }));
   const offers = outcomes.flatMap(outcome => outcome.offers);

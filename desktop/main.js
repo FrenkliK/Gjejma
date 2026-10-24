@@ -21,11 +21,15 @@ function handleSquirrelEvent() {
 }
 
 function writeDiagnostic(error) {
+  const line = `[${new Date().toISOString()}] ${error?.stack || error}\n`;
+  if (process.env.GJEJMA_SMOKE_LOG) {
+    try { fs.appendFileSync(process.env.GJEJMA_SMOKE_LOG, line); } catch {}
+  }
   try {
     const directory = path.join(app.getPath('userData'), 'logs');
     fs.mkdirSync(directory, { recursive: true });
     const file = path.join(directory, 'gjejma.log');
-    fs.appendFileSync(file, `[${new Date().toISOString()}] ${error?.stack || error}\n`);
+    fs.appendFileSync(file, line);
     return file;
   } catch {
     return 'Nuk u krijua dot skedari i regjistrit.';

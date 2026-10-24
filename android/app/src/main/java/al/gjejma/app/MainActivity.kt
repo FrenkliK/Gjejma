@@ -6,10 +6,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -56,7 +58,7 @@ class MainActivity : ComponentActivity() {
 
 private data class Store(val id: String, val name: String, val domain: String, val url: String, val adapter: String, val currency: String, val categories: Set<String>)
 private data class Offer(val store: String, val domain: String, val price: Double, val currency: String, val availability: String, val url: String, val checkedAt: Long)
-private data class StorePlan(val category: String?, val stores: List<Store>)
+private data class StorePlan(val category: String?, val filterCategory: String?, val stores: List<Store>)
 private suspend fun fetchText(address: String): String = withContext(Dispatchers.IO) {
     val c = URL(address).openConnection() as HttpURLConnection
     c.connectTimeout = 10_000; c.readTimeout = 16_000; c.instanceFollowRedirects = true
@@ -79,9 +81,8 @@ private suspend fun storeDirectory(context: android.content.Context): List<Store
     }
 }
 
-private suspend fun loadSearchConfig(context: android.content.Context): JSONObject = withContext(Dispatchers.IO) {
-    JSONObject(context.assets.open("search-config.json").bufferedReader().use { it.readText() })
-}
+private fun readSearchConfig(context: android.content.Context) = JSONObject(context.assets.open("search-config.json").bufferedReader().use { it.readText() })
+private suspend fun loadSearchConfig(context: android.content.Context): JSONObject = withContext(Dispatchers.IO) { readSearchConfig(context) }
 
 private fun parsePrice(raw: Any?): Double? {
     val s = raw?.toString()?.replace(Regex("[^0-9.,]"), "")?.takeIf(String::isNotBlank) ?: return null
@@ -192,15 +193,29 @@ private fun searchAlternatives(query: String, config: JSONObject): List<String> 
     return (listOf(clean, correctedQuery(query,config), translated) + extras).distinct().filter(String::isNotBlank)
 }
 
-private fun selectStores(query: String, stores: List<Store>, config: JSONObject): StorePlan {
-    val category = detectCategory(query, config) ?: return StorePlan(null, stores)
-    val groups = config.optJSONObject("storeGroups")?.optJSONArray(category) ?: return StorePlan(null, stores)
+private fun selectStores(query: String, stores: List<Store>, config: JSONObject, requestedCategory: String = ""): StorePlan {
+    val categories=config.optJSONObject("userCategories") ?: JSONObject()
+    val filterCategory=requestedCategory.takeIf { it.isNotBlank() && categories.has(it) }
+    val category=filterCategory ?: detectCategory(query, config) ?: return StorePlan(null,null,stores)
+    val groupKey=if(filterCategory!=null) categories.optJSONObject(category)?.optString("storeGroup") ?: category else category
+    val groups = config.optJSONObject("storeGroups")?.optJSONArray(groupKey) ?: return StorePlan(null,null,stores)
     val allowed = (0 until groups.length()).map(groups::getString).toSet()
     val selected = stores.filter { store -> store.categories.any(allowed::contains) }
-    return if (selected.isEmpty()) StorePlan(null, stores) else StorePlan(category, selected)
+    return if (selected.isEmpty()) StorePlan(null,null,stores) else StorePlan(category,filterCategory,selected)
 }
 
-private fun queryMatches(title: String, query: String, config: JSONObject): Boolean {
+private fun matchesUserCategory(title: String, category: String?, config: JSONObject): Boolean {
+    if(category==null)return true
+    val rule=config.optJSONObject("userCategories")?.optJSONObject(category) ?: return true
+    val normalized=normalize(title)
+    val excluded=rule.optJSONArray("exclude") ?: JSONArray()
+    if((0 until excluded.length()).any { hasPhrase(normalized,excluded.optString(it)) })return false
+    val included=rule.optJSONArray("include") ?: return true
+    return (0 until included.length()).any { hasPhrase(normalized,included.optString(it)) }
+}
+
+private fun queryMatches(title: String, query: String, config: JSONObject, filterCategory: String?): Boolean {
+    if(!matchesUserCategory(title,filterCategory,config))return false
     val titleText=normalize(title); val titleTokens=titleText.split(" ").filter(String::isNotBlank)
     return searchAlternatives(query, config).any { alternative ->
         val terms=normalize(alternative).split(" ").filter(String::isNotBlank)
@@ -225,10 +240,10 @@ private fun queryUrl(store: Store, query: String, route: String = ""): String {
     }
 }
 
-private fun parseSearchResponse(store: Store, raw: String, query: String, config: JSONObject): List<Pair<String, Offer>> {
+private fun parseSearchResponse(store: Store, raw: String, query: String, config: JSONObject, filterCategory: String?): List<Pair<String, Offer>> {
     val found = mutableListOf<Pair<String, Offer>>()
     fun add(title: String, link: String, price: Double?, currency: String, stock: String, identity: String) {
-        if (price == null || title.isBlank() || !queryMatches(title, query, config)) return
+        if (price == null || title.isBlank() || !queryMatches(title, query, config, filterCategory)) return
         val offer = safeProduct(store, title, link, price, currency, stock, identity) ?: return
         val o = offer.getJSONObject("offer")
         found += title to Offer(store.name, store.domain, o.getDouble("price"), o.getString("currency"), o.getString("availability"), o.getString("url"), o.getLong("checkedAt"))
@@ -276,7 +291,7 @@ private fun parseSearchResponse(store: Store, raw: String, query: String, config
     return found.distinctBy { it.second.url }
 }
 
-private suspend fun searchStore(store: Store, query: String, config: JSONObject): Pair<List<Pair<String, Offer>>, String?> {
+private suspend fun searchStore(store: Store, query: String, config: JSONObject, filterCategory: String?): Pair<List<Pair<String, Offer>>, String?> {
     val errors = mutableListOf<String>()
     val routes = when (store.adapter) {
         "shopify" -> listOf("", "search", "store")
@@ -288,7 +303,7 @@ private suspend fun searchStore(store: Store, query: String, config: JSONObject)
         for (route in routes) {
             try {
                 val raw = fetchText(queryUrl(store, searchTerm, route))
-                val offers = parseSearchResponse(store, raw, query, config)
+                val offers = parseSearchResponse(store, raw, query, config, filterCategory)
                 if (offers.isNotEmpty()) return offers to null
             } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
         }
@@ -302,9 +317,11 @@ private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> U
     var message by remember { mutableStateOf("Kërkimi kontrollon dyqanet drejtpërdrejt.") }
     var busy by remember { mutableStateOf(false) }
     var details by rememberSaveable { mutableStateOf(false) }
+    var selectedCategory by rememberSaveable { mutableStateOf("") }
+    val categoryOptions = remember { runCatching { readSearchConfig(context).optJSONObject("userCategories") ?: JSONObject() }.getOrDefault(JSONObject()) }
     val scope = rememberCoroutineScope()
 
-    fun search() {
+    fun search(categoryFilter: String = selectedCategory) {
         val term = query.trim()
         if (term.length < 2 || busy) return
         busy = true; results = emptyList(); message = "Po kërkoj live në dyqanet shqiptare…"
@@ -312,12 +329,12 @@ private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> U
             try {
                 val directory = storeDirectory(context)
                 val config = loadSearchConfig(context)
-                val plan = selectStores(term, directory, config)
-                val answers = coroutineScope { plan.stores.map { store -> async { store to searchStore(store, term, config) } }.awaitAll() }
+                val plan = selectStores(term, directory, config, categoryFilter)
+                val answers = coroutineScope { plan.stores.map { store -> async { store to searchStore(store, term, config, plan.filterCategory) } }.awaitAll() }
                 results = answers.flatMap { it.second.first }.sortedBy { it.second.price }
                 val foundStores = answers.count { it.second.first.isNotEmpty() }
                 val errors = answers.filter { it.second.second != null }.take(4).joinToString("\n") { "${it.first.name}: ${it.second.second}" }
-                val category = plan.category?.let { " · ${categoryLabels[it] ?: it}" }.orEmpty()
+                val category = plan.category?.let { " · ${categoryOptions.optJSONObject(it)?.optString("label", categoryLabels[it] ?: it) ?: categoryLabels[it] ?: it}" }.orEmpty()
                 message = "Live · $foundStores/${plan.stores.size} dyqane me oferta · ${plan.stores.size}/${directory.size} të kontrolluara$category · ${results.size} oferta · ${java.text.SimpleDateFormat("HH:mm:ss", Locale("sq", "AL")).format(java.util.Date())}" + if (results.isEmpty() && errors.isNotBlank()) "\n$errors" else ""
             } catch (e: Exception) { message = "Kërkimi live dështoi: ${e.message ?: "kontrollo lidhjen"}" }
             finally { busy = false }
@@ -332,6 +349,16 @@ private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> U
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("Kërko produkt") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), shape = RoundedCornerShape(12.dp))
         }
         Text("Provo: PS5 · S26 Ultra · TV · frigorifer · biçikletë elektrike", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
+        Spacer(Modifier.height(10.dp))
+        Text("Filtro sipas kategorisë (opsionale)", color = Muted, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(selected = selectedCategory.isBlank(), enabled = !busy, onClick = { selectedCategory=""; if(query.trim().length>=2) search("") }, label = { Text("Të gjitha") })
+            val keys=categoryOptions.keys()
+            while(keys.hasNext()) {
+                val key=keys.next(); val label=categoryOptions.optJSONObject(key)?.optString("label",key) ?: key
+                FilterChip(selected=selectedCategory==key,enabled=!busy,onClick={selectedCategory=key;if(query.trim().length>=2)search(key)},label={Text(label)})
+            }
+        }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = { search() }, enabled = !busy && query.trim().length >= 2, shape = RoundedCornerShape(12.dp)) {

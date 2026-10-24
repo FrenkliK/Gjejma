@@ -50,12 +50,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Kontrollo sintaksën e JavaScript-it
+        run: |
+          node --check server/server.js
+          node --check server/collector.js
+          node --check web/app.js
+          node --check desktop/main.js
+          node --check desktop/forge.config.js
+      - name: Vendos versionin e paketës Windows
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -match '^v(\d+\.\d+\.\d+)$') {
+            $version = $Matches[1]
+          } else {
+            $version = "1.0.$env:GITHUB_RUN_NUMBER"
+          }
+          npm pkg set version=$version
       - name: Install desktop build tools
         working-directory: desktop
         run: npm install --no-audit --no-fund
       - name: Package Windows installer
         working-directory: desktop
         run: npm run make
+      - name: Kontrollo aplikacionin e paketuar
+        shell: pwsh
+        run: |
+          $application = Get-ChildItem -Path desktop/out -Filter "Gjejma.exe" -File -Recurse | Select-Object -First 1
+          if (-not $application) { throw "Gjejma.exe was not produced by the desktop build." }
+          $output = & $application.FullName --squirrel-firstrun --gjejma-smoke-test 2>&1
+          $output | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "The packaged Gjejma app failed its local startup check." }
+          if ($output -notmatch "GJEJMA_SMOKE_OK") { throw "The packaged Gjejma app skipped its startup check." }
       - name: Prepare installer
         shell: pwsh
         run: |

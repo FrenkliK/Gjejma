@@ -22,7 +22,7 @@ The website server binds to the machine's available interfaces. The Android APK 
 
 ## Collection
 
-Normal searches use `collector.js` live adapters for WooCommerce, Shopify, Shopware, retailer search pages, JSON-LD, and common product cards. `robots.txt` is not used as a blocker for stores the project is authorized to query. Actual HTTP failures are shown per retailer; the app does not bypass logins, CAPTCHAs, or anti-bot protections. A legacy full-catalogue collector is available as an opt-in utility with `AUTO_COLLECT=true`, but normal search does not start it or read its database.
+Normal searches use `collector.js` live adapters for WooCommerce, Shopify, Shopware, Neptun's public product-autocomplete API, retailer search pages, JSON-LD, and common product cards. Neptun search results include its product title, current price, stock flag, and product URL; the Android client uses the same endpoint directly. `robots.txt` is not used as a blocker for stores the project is authorized to query. Actual HTTP failures are shown per retailer; the app does not bypass logins, CAPTCHAs, or anti-bot protections. A legacy full-catalogue collector is available as an opt-in utility with `AUTO_COLLECT=true`, but normal search does not start it or read its database.
 
 Retailer layouts and search APIs vary. A store may need a dedicated adapter if its search is JavaScript-only, changes its endpoint, or returns a real access error. Category routing reduces unnecessary requests, but does not guarantee every enabled store can return a result for every product.
 

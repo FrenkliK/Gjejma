@@ -1,6 +1,5 @@
 package al.gjejma.app
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -23,7 +22,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -41,11 +42,10 @@ private val Page = Color(0xFFF5F7F5)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val catalog = LocalCatalog(this)
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = Page) {
-                    GjejmaScreen(catalog, applicationContext) { link ->
+                    GjejmaScreen { link ->
                         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) }
                     }
                 }
@@ -69,53 +69,6 @@ private const val STORE_DIRECTORY = """[
 ]"""
 private data class Store(val id: String, val name: String, val domain: String, val url: String, val adapter: String, val currency: String)
 private data class Offer(val store: String, val domain: String, val price: Double, val currency: String, val availability: String, val url: String, val checkedAt: Long)
-private data class SearchResult(val title: String, val offers: List<Offer>)
-
-private class LocalCatalog(context: Context) {
-    private val prefs = context.getSharedPreferences("gjejma-local", Context.MODE_PRIVATE)
-    fun stores(): List<Store> {
-        val array = JSONArray(prefs.getString("stores", "[]"))
-        return buildList {
-            for (i in 0 until array.length()) {
-                val s = array.getJSONObject(i)
-                add(Store(s.getString("id"), s.getString("name"), s.getString("domain"), s.getString("url"), s.optString("adapter", "jsonld"), s.optString("currency", "ALL")))
-            }
-        }
-    }
-    fun saveStores(list: List<Store>) {
-        val a = JSONArray()
-        list.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("domain", it.domain).put("url", it.url).put("adapter", it.adapter).put("currency", it.currency)) }
-        prefs.edit().putString("stores", a.toString()).apply()
-    }
-    private fun products() = JSONArray(prefs.getString("products", "[]"))
-    fun count() = products().length()
-    fun putProducts(rows: List<JSONObject>) {
-        val all = products()
-        val indexes = HashMap<String, Int>()
-        for (i in 0 until all.length()) indexes[all.getJSONObject(i).getString("key")] = i
-        rows.forEach { row ->
-            val old = indexes[row.getString("key")]
-            if (old == null) { indexes[row.getString("key")] = all.length(); all.put(row) } else all.put(old, row)
-        }
-        prefs.edit().putString("products", all.toString()).apply()
-    }
-    fun search(query: String): List<SearchResult> {
-        val terms = normalize(query).split(" ").filter { it.length > 1 }
-        if (terms.isEmpty()) return emptyList()
-        val all = products()
-        val matches = mutableListOf<SearchResult>()
-        for (i in 0 until all.length()) {
-            val row = all.getJSONObject(i)
-            val title = row.optString("title")
-            val text = normalize(title)
-            if (!terms.all(text::contains)) continue
-            val o = row.getJSONObject("offer")
-            matches += SearchResult(title, listOf(Offer(o.optString("store"), o.optString("domain"), o.optDouble("price"), o.optString("currency", "ALL"), o.optString("availability", "unknown"), o.optString("url"), o.optLong("checkedAt"))))
-        }
-        return matches.groupBy { it.title }.map { (title, rows) -> SearchResult(title, rows.flatMap { it.offers }.sortedBy { it.price }) }.sortedBy { it.offers.minOfOrNull(Offer::price) ?: Double.MAX_VALUE }
-    }
-}
-
 private suspend fun fetchText(address: String): String = withContext(Dispatchers.IO) {
     val c = URL(address).openConnection() as HttpURLConnection
     c.connectTimeout = 10_000; c.readTimeout = 16_000; c.instanceFollowRedirects = true
@@ -134,25 +87,6 @@ private suspend fun storeDirectory(): List<Store> = withContext(Dispatchers.IO) 
     }
 }
 
-private fun robotsAllows(raw: String, path: String): Boolean {
-    var relevant = false; var hasRules = false
-    val rules = mutableListOf<Pair<Boolean, String>>()
-    raw.lineSequence().forEach { source ->
-        val line = source.substringBefore('#').trim(); val colon = line.indexOf(':')
-        if (colon <= 0) return@forEach
-        val key = line.substring(0, colon).trim().lowercase(); val value = line.substring(colon + 1).trim()
-        if (key == "user-agent") {
-            if (hasRules) { relevant = false; hasRules = false }
-            if (value == "*" || value.lowercase().contains("gjejma")) relevant = true
-        } else if (relevant && (key == "allow" || key == "disallow")) {
-            hasRules = true
-            if (value.isNotEmpty()) rules += (key == "allow") to value
-        }
-    }
-    val winner = rules.filter { path.startsWith(it.second.substringBefore('*')) }.maxByOrNull { it.second.length } ?: return true
-    return winner.first
-}
-
 private fun parsePrice(raw: Any?): Double? {
     val s = raw?.toString()?.replace(Regex("[^0-9.,]"), "")?.takeIf(String::isNotBlank) ?: return null
     val normalized = when {
@@ -165,7 +99,8 @@ private fun parsePrice(raw: Any?): Double? {
 
 private fun safeProduct(store: Store, title: String, link: String, price: Double, currency: String, stock: String, identity: String): JSONObject? {
     if (title.isBlank() || link.isBlank()) return null
-    val uri = runCatching { Uri.parse(link) }.getOrNull() ?: return null
+    val absoluteLink = if (link.startsWith("http://") || link.startsWith("https://")) link else "https://${store.domain}/${link.removePrefix("/")}"
+    val uri = runCatching { Uri.parse(absoluteLink) }.getOrNull() ?: return null
     val host = uri.host ?: return null
     if (host != store.domain && !host.endsWith(".${store.domain}")) return null
     val availability = when {
@@ -173,119 +108,143 @@ private fun safeProduct(store: Store, title: String, link: String, price: Double
         stock.contains("instock", true) || stock.contains("in stock", true) || stock.contains("available", true) -> "in_stock"
         else -> "unknown"
     }
-    val offer = JSONObject().put("store", store.name).put("domain", store.domain).put("price", price).put("currency", currency).put("availability", availability).put("url", link).put("checkedAt", System.currentTimeMillis())
+    val offer = JSONObject().put("store", store.name).put("domain", store.domain).put("price", price).put("currency", currency).put("availability", availability).put("url", uri.toString()).put("checkedAt", System.currentTimeMillis())
     return JSONObject().put("key", "${store.id}:$identity").put("title", title).put("offer", offer)
 }
 
-private suspend fun collectWoo(store: Store): List<JSONObject> {
-    val robots = runCatching { fetchText("https://${store.domain}/robots.txt") }.getOrElse { if (it.message?.contains("HTTP 404") == true) "" else throw it }
-    val route = "/wp-json/wc/store/v1/products"
-    if (!robotsAllows(robots, route)) error("robots.txt blocks product catalogue")
-    val output = mutableListOf<JSONObject>()
-    for (page in 1..5) {
-        val array = JSONArray(fetchText("https://${store.domain}$route?per_page=100&page=$page"))
-        for (i in 0 until array.length()) {
-            val p = array.getJSONObject(i); val prices = p.optJSONObject("prices")
-            val raw = prices?.optString("price")?.takeIf(String::isNotBlank) ?: p.optString("price")
-            var amount = parsePrice(raw) ?: continue
-            val minor = prices?.optInt("currency_minor_unit", 0) ?: 0
-            if (minor > 0 && prices?.optString("price")?.isNotBlank() == true) amount /= Math.pow(10.0, minor.toDouble())
-            safeProduct(store, p.optString("name"), p.optString("permalink"), amount, prices?.optString("currency_code")?.takeIf(String::isNotBlank) ?: store.currency, p.optString("stock_status"), p.optString("sku").ifBlank { p.optString("id") })?.let(output::add)
-        }
-        if (array.length() < 100) break
-        delay(350)
-    }
-    return output
-}
-
-private suspend fun collectJsonLd(store: Store): List<JSONObject> {
-    val robots = runCatching { fetchText("https://${store.domain}/robots.txt") }.getOrElse { if (it.message?.contains("HTTP 404") == true) "" else throw it }
-    val path = Uri.parse(store.url).path ?: "/"
-    if (!robotsAllows(robots, path)) error("robots.txt blocks catalogue page")
-    val html = fetchText(store.url)
-    val script = Regex("<script[^>]+type=[\"']application/ld\\+json[\"'][^>]*>([\\s\\S]*?)</script>", RegexOption.IGNORE_CASE)
-    val output = mutableListOf<JSONObject>()
-    for (match in script.findAll(html)) {
-        val root = runCatching { JSONObject(match.groupValues[1]) }.getOrNull() ?: continue
-        val graph = root.optJSONArray("@graph") ?: JSONArray().put(root)
-        for (i in 0 until graph.length()) {
-            val p = graph.optJSONObject(i) ?: continue
-            if (p.optString("@type") != "Product") continue
-            val offers = p.optJSONArray("offers")?.optJSONObject(0) ?: p.optJSONObject("offers") ?: continue
-            val price = parsePrice(offers.opt("price") ?: offers.opt("lowPrice")) ?: continue
-            val link = p.optString("url").ifBlank { offers.optString("url", store.url) }
-            safeProduct(store, p.optString("name"), link, price, offers.optString("priceCurrency", store.currency), offers.optString("availability"), p.optString("sku").ifBlank { link })?.let(output::add)
-        }
-    }
-    return output
-}
-
-private suspend fun collect(store: Store) = if (store.adapter == "woocommerce") collectWoo(store) else collectJsonLd(store)
 private fun normalize(s: String) = java.text.Normalizer.normalize(s.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
 
+private fun queryUrl(store: Store, query: String, route: String = ""): String {
+    val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+    return when {
+        store.adapter == "shopify" && route.isEmpty() -> "https://${store.domain}/search/suggest.json?q=$encoded&resources[type]=product&resources[limit]=20"
+        route == "woo" -> "https://${store.domain}/wp-json/wc/store/v1/products?search=$encoded&per_page=30"
+        route == "search" -> "https://${store.domain}/search?q=$encoded"
+        route == "store" -> "${store.url}${if (store.url.contains('?')) '&' else '?'}s=$encoded&post_type=product"
+        else -> "https://${store.domain}/?s=$encoded&post_type=product"
+    }
+}
+
+private fun parseSearchResponse(store: Store, raw: String, query: String): List<Pair<String, Offer>> {
+    val found = mutableListOf<Pair<String, Offer>>()
+    val terms = normalize(query).split(" ").filter(String::isNotBlank)
+    fun add(title: String, link: String, price: Double?, currency: String, stock: String, identity: String) {
+        if (price == null || title.isBlank() || !terms.all(normalize(title)::contains)) return
+        val offer = safeProduct(store, title, link, price, currency, stock, identity) ?: return
+        val o = offer.getJSONObject("offer")
+        found += title to Offer(store.name, store.domain, o.getDouble("price"), o.getString("currency"), o.getString("availability"), o.getString("url"), o.getLong("checkedAt"))
+    }
+    if (store.adapter == "shopify" && raw.trimStart().startsWith('{')) {
+        val root = runCatching { JSONObject(raw) }.getOrNull()
+        val resources = root?.optJSONObject("resources")?.optJSONObject("results")
+        val products = resources?.optJSONArray("products") ?: root?.optJSONArray("products")
+        if (products != null) for (i in 0 until products.length()) {
+            val p = products.optJSONObject(i) ?: continue; val variant = p.optJSONArray("variants")?.optJSONObject(0)
+            val link = p.optString("url").ifBlank { "/products/${p.optString("handle")}" }
+            add(p.optString("title"), link, parsePrice(variant?.opt("price") ?: p.opt("price")), store.currency, if (variant?.optBoolean("available") == true) "in stock" else "", variant?.optString("sku").orEmpty())
+        }
+    }
+    if (raw.trimStart().startsWith('[')) {
+        val array = runCatching { JSONArray(raw) }.getOrNull()
+        if (array != null) for (i in 0 until array.length()) {
+            val p = array.optJSONObject(i) ?: continue; val prices = p.optJSONObject("prices")
+            var amount = parsePrice(prices?.opt("price") ?: p.opt("sale_price") ?: p.opt("price") ?: p.opt("regular_price"))
+            if (amount != null && prices?.has("price") == true) amount /= Math.pow(10.0, prices.optInt("currency_minor_unit", 0).toDouble())
+            add(p.optString("name", p.optString("title")), p.optString("permalink", p.optString("url")), amount, prices?.optString("currency_code", store.currency) ?: store.currency, p.optString("stock_status"), p.optString("sku", p.optString("id")))
+        }
+    } else {
+        val script = Regex("<script[^>]+type=[\\\"']application/ld\\+json[\\\"'][^>]*>([\\s\\S]*?)</script>", RegexOption.IGNORE_CASE)
+        for (match in script.findAll(raw)) {
+            val root = runCatching { JSONObject(match.groupValues[1]) }.getOrNull() ?: continue
+            val graph = root.optJSONArray("@graph") ?: JSONArray().put(root)
+            for (i in 0 until graph.length()) {
+                val p = graph.optJSONObject(i) ?: continue
+                if (p.opt("@type")?.toString()?.contains("Product") != true) continue
+                val offers = p.optJSONArray("offers")?.optJSONObject(0) ?: p.optJSONObject("offers") ?: continue
+                add(p.optString("name"), p.optString("url").ifBlank { offers.optString("url", store.url) }, parsePrice(offers.opt("price") ?: offers.opt("lowPrice")), offers.optString("priceCurrency", store.currency), offers.optString("availability"), p.optString("sku"))
+            }
+        }
+        val blocks = Regex("<(?:article|li|div)\\b[^>]*(?:product|item)[^>]*>[\\s\\S]*?</(?:article|li|div)>", RegexOption.IGNORE_CASE)
+        for (match in blocks.findAll(raw)) {
+            val block = match.value
+            val link = Regex("<a\\b[^>]*href=[\\\"']([^\\\"']+)[\\\"']", RegexOption.IGNORE_CASE).find(block)?.groupValues?.get(1) ?: continue
+            val title = Regex("<(?:h2|h3)[^>]*>([\\s\\S]*?)</(?:h2|h3)>", RegexOption.IGNORE_CASE).find(block)?.groupValues?.get(1)?.replace(Regex("<[^>]*>"), " ")?.trim().orEmpty()
+            val amount = Regex("(?:woocommerce-Price-amount|price|amount)[^>]*>[\\s\\S]{0,100}?([\\d][\\d., ]*)", RegexOption.IGNORE_CASE).find(block)?.groupValues?.get(1)
+                ?: Regex("(?:ALL|Lek|L)\\s*([\\d][\\d., ]*)", RegexOption.IGNORE_CASE).find(block)?.groupValues?.get(1)
+            add(title, link, parsePrice(amount), store.currency, if (Regex("out of stock|sold out|nuk ka stok", RegexOption.IGNORE_CASE).containsMatchIn(block)) "out" else "", link)
+        }
+    }
+    return found.distinctBy { it.second.url }
+}
+
+private suspend fun searchStore(store: Store, query: String): Pair<List<Pair<String, Offer>>, String?> {
+    val routes = if (store.adapter == "shopify") listOf("", "search", "store") else listOf("woo", "", "store", "search")
+    val errors = mutableListOf<String>()
+    for (route in routes) {
+        try {
+            val raw = fetchText(queryUrl(store, query, route))
+            val offers = parseSearchResponse(store, raw, query)
+            if (offers.isNotEmpty()) return offers to null
+        } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
+    }
+    return emptyList<Pair<String, Offer>>() to (errors.distinct().joinToString(", ").ifBlank { "Nuk u gjet listim publik që përputhet" })
+}
 @Composable
-private fun GjejmaScreen(db: LocalCatalog, context: Context, onOpen: (String) -> Unit) {
+private fun GjejmaScreen(onOpen: (String) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    var results by remember { mutableStateOf(emptyList<SearchResult>()) }
-    var message by remember { mutableStateOf("${db.count()} oferta të ruajtura në telefon.") }
+    var results by remember { mutableStateOf(emptyList<Pair<String, Offer>>()) }
+    var message by remember { mutableStateOf("Kërkimi kontrollon dyqanet drejtpërdrejt.") }
     var busy by remember { mutableStateOf(false) }
     var details by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     fun search() {
-        results = db.search(query)
-        message = when { query.isBlank() -> "${db.count()} oferta të ruajtura në telefon."; results.isEmpty() -> "Nuk u gjet në katalogun lokal. Rifresko dyqanet me internet."; else -> "${results.sumOf { it.offers.size }} oferta · kontrollo çmimin te shitësi." }
-    }
-    fun refresh() {
-        if (busy) return
-        busy = true; message = "Po kontrolloj katalogët publikë. Kjo mund të zgjasë disa minuta…"
+        val term = query.trim()
+        if (term.length < 2 || busy) return
+        busy = true; results = emptyList(); message = "Po kërkoj live në dyqanet shqiptare…"
         scope.launch {
             try {
-                val stores = if (db.stores().isEmpty()) storeDirectory().also(db::saveStores) else db.stores()
-                var ok = 0; var count = 0; val errors = mutableListOf<String>()
-                for (store in stores) {
-                    try { val rows = collect(store); db.putProducts(rows); ok++; count += rows.size }
-                    catch (e: Exception) { errors += "${store.name}: ${e.message ?: "s’u arrit"}" }
-                }
-                search()
-                message = if (ok == 0) "Asnjë dyqan nuk dha feed publik tani. ${errors.firstOrNull().orEmpty()}" else "U ruajtën $count produkte nga $ok/${stores.size} dyqane. Kërkimi tani punon offline."
-            } catch (_: Exception) { message = "Nuk u shkarkua lista e dyqaneve. Kontrollo internetin dhe provo sërish." }
+                val stores = storeDirectory()
+                val answers = coroutineScope { stores.map { store -> async { store to searchStore(store, term) } }.awaitAll() }
+                results = answers.flatMap { it.second.first }.sortedBy { it.second.price }
+                val foundStores = answers.count { it.second.first.isNotEmpty() }
+                val errors = answers.filter { it.second.second != null }.take(4).joinToString("\n") { "${it.first.name}: ${it.second.second}" }
+                message = "Live · $foundStores/${stores.size} dyqane me oferta · ${results.size} oferta · kontrolluar ${java.text.SimpleDateFormat("HH:mm:ss", Locale("sq", "AL")).format(java.util.Date())}" + if (results.isEmpty() && errors.isNotBlank()) "\n$errors" else ""
+            } catch (e: Exception) { message = "Kërkimi live dështoi: ${e.message ?: "kontrollo lidhjen"}" }
             finally { busy = false }
         }
     }
 
     Column(Modifier.fillMaxSize().background(Page).padding(horizontal = 18.dp, vertical = 18.dp)) {
         Text("gjejma.", color = Forest, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-        Text("Katalog në telefon. Kërko edhe offline.", color = Muted, fontSize = 13.sp)
+        Text("Çmime live nga dyqanet shqiptare.", color = Muted, fontSize = 13.sp)
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(query, { query = it; results = db.search(it) }, Modifier.weight(1f), label = { Text("Kërko produkt") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), shape = RoundedCornerShape(12.dp))
-            Spacer(Modifier.width(8.dp)); Button(onClick = { search() }, shape = RoundedCornerShape(12.dp)) { Text("Gjej") }
+            OutlinedTextField(query, { query = it }, Modifier.weight(1f), label = { Text("Kërko produkt") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), shape = RoundedCornerShape(12.dp))
+            Spacer(Modifier.width(8.dp)); Button(onClick = { search() }, enabled = !busy, shape = RoundedCornerShape(12.dp)) { Text("Gjej") }
         }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = { refresh() }, enabled = !busy, shape = RoundedCornerShape(12.dp)) {
+            Button(onClick = { search() }, enabled = !busy && query.trim().length >= 2, shape = RoundedCornerShape(12.dp)) {
                 if (busy) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White); Spacer(Modifier.width(8.dp)) }
-                Text(if (busy) "Po rifreskohet…" else "Rifresko dyqanet")
+                Text(if (busy) "Po kërkoj…" else "Kërko tani")
             }
             Spacer(Modifier.width(8.dp)); TextButton(onClick = { details = !details }) { Text(if (details) "Mbyll" else "Si funksionon", color = Forest) }
         }
-        if (details) Text("Rifreskimi kërkon internet dhe lexon feed-e publike që lejojnë kërkesat. Çmimet ruhen në këtë telefon; kërkimi pas rifreskimit punon offline. Kontrollo çmimin dhe stokun te dyqani para blerjes.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
+        if (details) Text("Çdo kërkim dërgohet drejtpërdrejt te dyqanet. Ofertat nuk ruhen në telefon dhe kërkojnë internet. Disa faqe mund të mos përgjigjen ose të mos publikojnë listime të lexueshme; gabimet shfaqen te rezultati. Konfirmo çmimin dhe stokun te shitësi.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp))
         Text(message, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 5.dp))
         Spacer(Modifier.height(4.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(results) { product ->
-                Text(product.title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp, bottom = 1.dp))
-                product.offers.forEach { offer ->
-                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(14.dp)) {
-                        Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.weight(1f)) { Text(offer.store, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp); Text(offer.domain, color = Muted, fontSize = 11.sp) }
-                                Text(formatPrice(offer.price, offer.currency), color = Forest, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            }
-                            Spacer(Modifier.height(6.dp)); Text(availabilityLabel(offer.availability), color = Muted, fontSize = 11.sp)
-                            TextButton(onClick = { onOpen(offer.url) }, modifier = Modifier.align(Alignment.End)) { Text("Hap dyqanin ↗", color = Forest, fontWeight = FontWeight.Bold) }
+            items(results) { (title, offer) ->
+                Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp, bottom = 1.dp))
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(14.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.weight(1f)) { Text(offer.store, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp); Text(offer.domain, color = Muted, fontSize = 11.sp) }
+                            Text(formatPrice(offer.price, offer.currency), color = Forest, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
+                        Spacer(Modifier.height(6.dp)); Text(availabilityLabel(offer.availability), color = Muted, fontSize = 11.sp)
+                        TextButton(onClick = { onOpen(offer.url) }, modifier = Modifier.align(Alignment.End)) { Text("Hap dyqanin ↗", color = Forest, fontWeight = FontWeight.Bold) }
                     }
                 }
             }

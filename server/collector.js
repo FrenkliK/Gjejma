@@ -227,6 +227,12 @@ function queryMatches(title, query) {
   });
 }
 
+function searchErrorSummary(errors) {
+  const distinct = [...new Set(errors)];
+  const useful = distinct.filter(error => error !== 'HTTP 404');
+  return useful.length ? useful.join(', ') : errors.length ? 'Nuk u gjet endpoint publik kërkimi' : null;
+}
+
 function isOneTypoAway(a, b) {
   if (a.length < 5 || b.length < 5 || Math.abs(a.length - b.length) > 1) return false;
   let i = 0, j = 0, edits = 0;
@@ -262,26 +268,30 @@ function matchesUserCategory(title, category) {
 
 async function searchStore(store, query, filterCategory = null) {
   const errors = [];
+  let responded = false;
   if (store.adapter === 'neptun') {
     for (const searchTerm of searchAlternatives(query)) {
       try {
-        const results = fromNeptun(await fetchNeptunSearch(store, searchTerm), store)
+        const data = await fetchNeptunSearch(store, searchTerm);
+        responded = true;
+        const results = fromNeptun(data, store)
           .filter(row => queryMatches(row.title, query) && matchesUserCategory(row.title, filterCategory));
         if (results.length) return { offers: results, error: null };
       } catch (error) { errors.push(error.message || 'request failed'); }
     }
-    return { offers: [], error: [...new Set(errors)].join(', ') || 'No matching public product listing found' };
+    return { offers: [], error: responded ? null : searchErrorSummary(errors) };
   }
   const html = (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)];
   for (const searchTerm of searchAlternatives(query)) {
     const encoded = encodeURIComponent(searchTerm);
     const attempts = [];
     if (store.adapter === 'shopify') attempts.push({ url: `https://${store.domain}/search/suggest.json?q=${encoded}&resources[type]=product&resources[limit]=20`, parse: fromShopify });
-    if (store.adapter === 'woocommerce') attempts.push({ url: `https://${store.domain}/wp-json/wc/store/v1/products?search=${encoded}&per_page=30`, parse: fromWoo });
+    if (store.adapter === 'woocommerce') attempts.push({ url: `https://${store.domain}/wp-json/wc/store/v1/products?search=${encoded}&per_page=100`, parse: fromWoo });
     if (store.adapter === 'shopware') attempts.push({ url: `https://${store.domain}/search?search=${encoded}`, parse: html });
     attempts.push({ url: `https://${store.domain}/search?q=${encoded}`, parse: html });
     if (store.adapter === 'generic') attempts.push({ url: `https://${store.domain}/search?search=${encoded}`, parse: html });
     attempts.push({ url: `https://${store.domain}/?s=${encoded}&post_type=product`, parse: html });
+    attempts.push({ url: `https://${store.domain}/?s=${encoded}`, parse: html });
     if (store.adapter === 'generic') {
       attempts.push({ url: `https://${store.domain}/?q=${encoded}`, parse: html });
       attempts.push({ url: `https://${store.domain}/products?search=${encoded}`, parse: html });
@@ -294,23 +304,48 @@ async function searchStore(store, query, filterCategory = null) {
       seen.add(attempt.url);
       try {
         const body = await fetchText(attempt.url);
+        responded = true;
         const found = attempt.parse(body, store).filter(row => queryMatches(row.title, query) && matchesUserCategory(row.title, filterCategory));
         if (found.length) return { offers: found, error: null };
+        // A valid platform search response is authoritative for this term.
+        // Don't probe unrelated URL patterns afterward and turn their 403s into
+        // a misleading store-level failure.
+        if (store.adapter === 'woocommerce' && attempt.url.includes('/wp-json/wc/store/v1/products?')) {
+          try { if (Array.isArray(JSON.parse(body))) break; } catch { /* Try the public HTML search fallback. */ }
+        }
+        if (store.adapter === 'shopify' && attempt.parse === fromShopify) {
+          try {
+            const payload = JSON.parse(body);
+            if (Array.isArray(payload?.resources?.results?.products) || Array.isArray(payload?.products)) break;
+          } catch { /* Try the public HTML search fallback. */ }
+        }
       } catch (error) { errors.push(error.message || 'request failed'); }
     }
   }
-  const distinct = [...new Set(errors)];
-  return { offers: [], error: distinct.length ? distinct.join(', ') : 'No matching public product listing found' };
+  return { offers: [], error: responded ? null : searchErrorSummary(errors) };
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index], index);
+    }
+  }));
+  return results;
 }
 
 async function searchStores(query, requestedCategory = '') {
   const plan = selectStores(query, requestedCategory);
   const selected = plan.stores;
   const checkedAt = new Date().toISOString();
-  const outcomes = await Promise.all(selected.map(async store => {
+  const outcomes = await mapWithConcurrency(selected, 8, async store => {
     try { return { store, ...(await searchStore(store, query, plan.filterCategory)) }; }
     catch (error) { return { store, offers: [], error: error.message || 'request failed' }; }
-  }));
+  });
   const offers = outcomes.flatMap(outcome => outcome.offers);
   const storeErrors = outcomes.filter(outcome => outcome.error).map(({ store, error }) => ({ id: store.id, name: store.name, error }));
   offers.sort((a, b) => a.price - b.price);

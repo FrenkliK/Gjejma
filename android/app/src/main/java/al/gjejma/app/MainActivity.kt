@@ -54,8 +54,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class Store(val id: String, val name: String, val domain: String, val url: String, val adapter: String, val currency: String)
+private data class Store(val id: String, val name: String, val domain: String, val url: String, val adapter: String, val currency: String, val categories: Set<String>)
 private data class Offer(val store: String, val domain: String, val price: Double, val currency: String, val availability: String, val url: String, val checkedAt: Long)
+private data class StorePlan(val category: String?, val stores: List<Store>)
 private suspend fun fetchText(address: String): String = withContext(Dispatchers.IO) {
     val c = URL(address).openConnection() as HttpURLConnection
     c.connectTimeout = 10_000; c.readTimeout = 16_000; c.instanceFollowRedirects = true
@@ -70,9 +71,16 @@ private suspend fun storeDirectory(context: android.content.Context): List<Store
     buildList {
         for (i in 0 until a.length()) {
             val s = a.getJSONObject(i)
-            if (s.optBoolean("enabled") && s.optString("country") == "AL") add(Store(s.getString("id"), s.getString("name"), s.getString("domain"), s.getString("url"), s.optString("adapter", "jsonld"), s.optString("currency", "ALL")))
+            if (s.optBoolean("enabled") && s.optString("country") == "AL") {
+                val tags=s.optJSONArray("categories") ?: JSONArray()
+                add(Store(s.getString("id"), s.getString("name"), s.getString("domain"), s.getString("url"), s.optString("adapter", "jsonld"), s.optString("currency", "ALL"), buildSet { for (j in 0 until tags.length()) add(tags.getString(j)) }))
+            }
         }
     }
+}
+
+private suspend fun loadSearchConfig(context: android.content.Context): JSONObject = withContext(Dispatchers.IO) {
+    JSONObject(context.assets.open("search-config.json").bufferedReader().use { it.readText() })
 }
 
 private fun parsePrice(raw: Any?): Double? {
@@ -102,8 +110,65 @@ private fun safeProduct(store: Store, title: String, link: String, price: Double
 
 private fun normalize(s: String) = java.text.Normalizer.normalize(s.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("\\bbiciklet\\b"), "biciklete").replace(Regex("[^a-z0-9]+"), " ").trim()
 
-private fun searchAlternatives(query: String): List<String> {
-    val translated = query.lowercase(Locale.ROOT)
+private fun hasPhrase(text: String, phrase: String) = " ${normalize(text)} ".contains(" ${normalize(phrase)} ")
+
+private fun isOneTypoAway(a: String, b: String): Boolean {
+    if (a.length < 5 || b.length < 5 || kotlin.math.abs(a.length - b.length) > 1) return false
+    var i=0; var j=0; var edits=0
+    while (i<a.length && j<b.length) {
+        if (a[i]==b[j]) { i++; j++; continue }
+        if (++edits>1) return false
+        if (a.length>b.length) i++ else if (b.length>a.length) j++ else { i++; j++ }
+    }
+    return (edits + if (i<a.length || j<b.length) 1 else 0) <= 1
+}
+
+private fun correctedQuery(query: String, config: JSONObject): String {
+    val vocabulary = mutableSetOf<String>()
+    val categories = config.optJSONObject("categories") ?: JSONObject()
+    val categoryKeys = categories.keys()
+    while (categoryKeys.hasNext()) {
+        val words = categories.optJSONArray(categoryKeys.next()) ?: continue
+        for (i in 0 until words.length()) vocabulary += normalize(words.optString(i)).split(" ").filter(String::isNotBlank)
+    }
+    val aliases = config.optJSONArray("aliases") ?: JSONArray()
+    for (i in 0 until aliases.length()) {
+        val alias=aliases.optJSONObject(i) ?: continue
+        for (field in listOf("match", "search")) {
+            val words=alias.optJSONArray(field) ?: continue
+            for (j in 0 until words.length()) vocabulary += normalize(words.optString(j)).split(" ").filter(String::isNotBlank)
+        }
+    }
+    val stopwords = config.optJSONArray("stopwords") ?: JSONArray()
+    val ignored=(0 until stopwords.length()).map { normalize(stopwords.optString(it)) }.toSet()
+    return normalize(query).split(" ").filter { it.isNotBlank() && it !in ignored }.map { token ->
+        if (token.length < 5 || token in vocabulary) token
+        else vocabulary.filter { isOneTypoAway(token, it) }.singleOrNull() ?: token
+    }.joinToString(" ")
+}
+
+private fun detectCategory(query: String, config: JSONObject): String? {
+    val corrected=correctedQuery(query,config)
+    val aliases = config.optJSONArray("aliases") ?: JSONArray()
+    for (i in 0 until aliases.length()) {
+        val alias = aliases.optJSONObject(i) ?: continue
+        val matches = alias.optJSONArray("match") ?: continue
+        if ((0 until matches.length()).any { hasPhrase(query, matches.optString(it)) || hasPhrase(corrected, matches.optString(it)) }) return alias.optString("category").takeIf(String::isNotBlank)
+    }
+    val categories = config.optJSONObject("categories") ?: return null
+    val keys = categories.keys()
+    while (keys.hasNext()) {
+        val category = keys.next(); val words = categories.optJSONArray(category) ?: continue
+        if ((0 until words.length()).any { hasPhrase(query, words.optString(it)) || hasPhrase(corrected, words.optString(it)) }) return category
+    }
+    return null
+}
+
+private fun searchAlternatives(query: String, config: JSONObject): List<String> {
+    val stopwords = config.optJSONArray("stopwords") ?: JSONArray()
+    val ignored = (0 until stopwords.length()).map { normalize(stopwords.optString(it)) }.toSet()
+    val clean = normalize(query).split(" ").filter { it.isNotBlank() && it !in ignored }.joinToString(" ")
+    val translated = clean.lowercase(Locale.ROOT)
         .replace(Regex("\\b(televisions?|smart tvs?)\\b"), "televizor")
         .replace(Regex("\\b(fridges?|friges?|refrigerators?|freezers?)\\b"), "frigorifer")
         .replace(Regex("\\btoasters?\\b"), "tostjere")
@@ -114,8 +179,36 @@ private fun searchAlternatives(query: String): List<String> {
         .replace(Regex("\\b(washing machines?|washers?)\\b"), "lavatrice")
         .replace(Regex("\\bdishwashers?\\b"), "lavastovilje")
         .replace(Regex("\\b(vacuum cleaners?|vacuums?)\\b"), "fshese")
-    return listOf(translated, query.trim()).distinct().filter(String::isNotBlank)
+    val extras = mutableListOf<String>()
+    val aliases = config.optJSONArray("aliases") ?: JSONArray()
+    for (i in 0 until aliases.length()) {
+        val alias = aliases.optJSONObject(i) ?: continue
+        val matches = alias.optJSONArray("match") ?: continue
+        if ((0 until matches.length()).any { hasPhrase(query, matches.optString(it)) }) {
+            val searches = alias.optJSONArray("search") ?: continue
+            for (j in 0 until searches.length()) extras += searches.optString(j)
+        }
+    }
+    return (listOf(clean, correctedQuery(query,config), translated) + extras).distinct().filter(String::isNotBlank)
 }
+
+private fun selectStores(query: String, stores: List<Store>, config: JSONObject): StorePlan {
+    val category = detectCategory(query, config) ?: return StorePlan(null, stores)
+    val groups = config.optJSONObject("storeGroups")?.optJSONArray(category) ?: return StorePlan(null, stores)
+    val allowed = (0 until groups.length()).map(groups::getString).toSet()
+    val selected = stores.filter { store -> store.categories.any(allowed::contains) }
+    return if (selected.isEmpty()) StorePlan(null, stores) else StorePlan(category, selected)
+}
+
+private fun queryMatches(title: String, query: String, config: JSONObject): Boolean {
+    val titleText=normalize(title); val titleTokens=titleText.split(" ").filter(String::isNotBlank)
+    return searchAlternatives(query, config).any { alternative ->
+        val terms=normalize(alternative).split(" ").filter(String::isNotBlank)
+        terms.isNotEmpty() && terms.all { term -> titleText.contains(term) || titleTokens.any { isOneTypoAway(term,it) } }
+    }
+}
+
+private val categoryLabels = mapOf("phones" to "Telefona", "gaming" to "Gaming", "computers" to "Kompjutera", "tv" to "TV", "appliances" to "Elektroshtëpiake", "mobility" to "Biçikleta & skuterë", "home" to "Shtëpi")
 
 private fun queryUrl(store: Store, query: String, route: String = ""): String {
     val encoded = java.net.URLEncoder.encode(query, "UTF-8")
@@ -132,11 +225,10 @@ private fun queryUrl(store: Store, query: String, route: String = ""): String {
     }
 }
 
-private fun parseSearchResponse(store: Store, raw: String, query: String): List<Pair<String, Offer>> {
+private fun parseSearchResponse(store: Store, raw: String, query: String, config: JSONObject): List<Pair<String, Offer>> {
     val found = mutableListOf<Pair<String, Offer>>()
-    val variants = searchAlternatives(query).map { normalize(it).split(" ").filter(String::isNotBlank) }
     fun add(title: String, link: String, price: Double?, currency: String, stock: String, identity: String) {
-        if (price == null || title.isBlank() || variants.none { terms -> terms.all(normalize(title)::contains) }) return
+        if (price == null || title.isBlank() || !queryMatches(title, query, config)) return
         val offer = safeProduct(store, title, link, price, currency, stock, identity) ?: return
         val o = offer.getJSONObject("offer")
         found += title to Offer(store.name, store.domain, o.getDouble("price"), o.getString("currency"), o.getString("availability"), o.getString("url"), o.getLong("checkedAt"))
@@ -184,7 +276,7 @@ private fun parseSearchResponse(store: Store, raw: String, query: String): List<
     return found.distinctBy { it.second.url }
 }
 
-private suspend fun searchStore(store: Store, query: String): Pair<List<Pair<String, Offer>>, String?> {
+private suspend fun searchStore(store: Store, query: String, config: JSONObject): Pair<List<Pair<String, Offer>>, String?> {
     val errors = mutableListOf<String>()
     val routes = when (store.adapter) {
         "shopify" -> listOf("", "search", "store")
@@ -192,11 +284,11 @@ private suspend fun searchStore(store: Store, query: String): Pair<List<Pair<Str
         "shopware" -> listOf("search", "query", "store")
         else -> listOf("search", "shopsearch", "query", "products", "opencart", "store")
     }
-    for (searchTerm in searchAlternatives(query)) {
+    for (searchTerm in searchAlternatives(query, config)) {
         for (route in routes) {
             try {
                 val raw = fetchText(queryUrl(store, searchTerm, route))
-                val offers = parseSearchResponse(store, raw, query)
+                val offers = parseSearchResponse(store, raw, query, config)
                 if (offers.isNotEmpty()) return offers to null
             } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
         }
@@ -218,12 +310,15 @@ private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> U
         busy = true; results = emptyList(); message = "Po kërkoj live në dyqanet shqiptare…"
         scope.launch {
             try {
-                val stores = storeDirectory(context)
-                val answers = coroutineScope { stores.map { store -> async { store to searchStore(store, term) } }.awaitAll() }
+                val directory = storeDirectory(context)
+                val config = loadSearchConfig(context)
+                val plan = selectStores(term, directory, config)
+                val answers = coroutineScope { plan.stores.map { store -> async { store to searchStore(store, term, config) } }.awaitAll() }
                 results = answers.flatMap { it.second.first }.sortedBy { it.second.price }
                 val foundStores = answers.count { it.second.first.isNotEmpty() }
                 val errors = answers.filter { it.second.second != null }.take(4).joinToString("\n") { "${it.first.name}: ${it.second.second}" }
-                message = "Live · $foundStores/${stores.size} dyqane me oferta · ${results.size} oferta · kontrolluar ${java.text.SimpleDateFormat("HH:mm:ss", Locale("sq", "AL")).format(java.util.Date())}" + if (results.isEmpty() && errors.isNotBlank()) "\n$errors" else ""
+                val category = plan.category?.let { " · ${categoryLabels[it] ?: it}" }.orEmpty()
+                message = "Live · $foundStores/${plan.stores.size} dyqane me oferta · ${plan.stores.size}/${directory.size} të kontrolluara$category · ${results.size} oferta · ${java.text.SimpleDateFormat("HH:mm:ss", Locale("sq", "AL")).format(java.util.Date())}" + if (results.isEmpty() && errors.isNotBlank()) "\n$errors" else ""
             } catch (e: Exception) { message = "Kërkimi live dështoi: ${e.message ?: "kontrollo lidhjen"}" }
             finally { busy = false }
         }
@@ -236,7 +331,7 @@ private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> U
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("Kërko produkt") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), shape = RoundedCornerShape(12.dp))
         }
-        Text("Kërko çdo kategori: TV · frigorifer · toster · biçikletë elektrike · laptop", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
+        Text("Provo: PS5 · S26 Ultra · TV · frigorifer · biçikletë elektrike", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = { search() }, enabled = !busy && query.trim().length >= 2, shape = RoundedCornerShape(12.dp)) {

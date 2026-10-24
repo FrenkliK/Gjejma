@@ -40,6 +40,13 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
+          if [ "$EVENT_NAME" = "push" ] && [ "$REF_TYPE" = "branch" ]; then
+            current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${REF_NAME}" --jq .sha)"
+            if [ "$current_sha" != "$GITHUB_SHA" ]; then
+              echo "A newer commit is already on $REF_NAME; skipping this stale APK release."
+              exit 0
+            fi
+          fi
           if [ "$EVENT_NAME" = "push" ] && [ "$REF_TYPE" = "tag" ]; then
             release_tag="$REF_NAME"
           else

@@ -54,6 +54,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private const val STORE_DIRECTORY = """[
+ {"id":"3vfejzo","name":"3V Fejzo","domain":"3vfejzo.al","url":"https://3vfejzo.al/products/telefona","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
+ {"id":"red-store","name":"Red Store","domain":"redstore.al","url":"https://redstore.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
+ {"id":"smartphoneshop","name":"The Smartphone Shop","domain":"smartphoneshop.al","url":"https://smartphoneshop.al/","enabled":true,"adapter":"jsonld","country":"AL","currency":"ALL"},
+ {"id":"bss","name":"BSS Buy Smart Store","domain":"bss.com.al","url":"https://bss.com.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
+ {"id":"gotech","name":"GoTech Electronics","domain":"gotech.al","url":"https://gotech.al/product-category/telefonia/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
+ {"id":"phoneshopalbania","name":"Phone Shop Albania","domain":"phoneshopalbania.al","url":"https://phoneshopalbania.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
+ {"id":"redline","name":"Redline","domain":"redline.com.al","url":"https://redline.com.al/","enabled":true,"adapter":"shopify","country":"AL","currency":"ALL"},
+ {"id":"smartstore","name":"Smart Store","domain":"smartstore.al","url":"https://smartstore.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"EUR"},
+ {"id":"agorai","name":"Agorai","domain":"agorai.al","url":"https://www.agorai.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
+ {"id":"shoptech","name":"ShopTech","domain":"shoptech.al","url":"https://shoptech.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
+ {"id":"boostmobile","name":"Boost Mobile","domain":"boostmobile.al","url":"https://boostmobile.al/en/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"}
+]"""
 private data class Store(val id: String, val name: String, val domain: String, val url: String, val adapter: String, val currency: String)
 private data class Offer(val store: String, val domain: String, val price: Double, val currency: String, val availability: String, val url: String, val checkedAt: Long)
 private data class SearchResult(val title: String, val offers: List<Offer>)
@@ -111,9 +124,8 @@ private suspend fun fetchText(address: String): String = withContext(Dispatchers
     try { if (c.responseCode !in 200..299) error("HTTP ${c.responseCode}"); c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
 }
 
-private suspend fun storeDirectory(context: Context): List<Store> = withContext(Dispatchers.IO) {
-    val bytes = context.assets.open("stores.json").bufferedReader().use { it.readText() }
-    val a = JSONArray(bytes)
+private suspend fun storeDirectory(): List<Store> = withContext(Dispatchers.IO) {
+    val a = JSONArray(STORE_DIRECTORY)
     buildList {
         for (i in 0 until a.length()) {
             val s = a.getJSONObject(i)
@@ -229,7 +241,7 @@ private fun GjejmaScreen(db: LocalCatalog, context: Context, onOpen: (String) ->
         busy = true; message = "Po kontrolloj katalogët publikë. Kjo mund të zgjasë disa minuta…"
         scope.launch {
             try {
-                val stores = if (db.stores().isEmpty()) storeDirectory(context).also(db::saveStores) else db.stores()
+                val stores = if (db.stores().isEmpty()) storeDirectory().also(db::saveStores) else db.stores()
                 var ok = 0; var count = 0; val errors = mutableListOf<String>()
                 for (store in stores) {
                     try { val rows = collect(store); db.putProducts(rows); ok++; count += rows.size }
@@ -291,6 +303,8 @@ private fun availabilityLabel(state: String) = when (state) {
     "preorder" -> "Paraporosi sipas listimit"
     else -> "Stoku i panjohur · kontrollo te shitësi"
 }
+
+
 
 
 

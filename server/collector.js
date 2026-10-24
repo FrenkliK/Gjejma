@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const stores = require('./stores.json');
+const searchConfig = require('./search-config.json');
 const DB = path.join(__dirname, 'db.json');
 const TIMEOUT = 12000;
 const USER_AGENT = 'Gjejma/1.1 (Albanian price comparison; https://github.com/FrenkliK/Gjejma)';
@@ -11,8 +12,40 @@ function normalize(value = '') {
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\bbiciklet\b/g, 'biciklete').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function hasPhrase(text, phrase) {
+  return ` ${normalize(text)} `.includes(` ${normalize(phrase)} `);
+}
+
+function correctedQuery(query) {
+  const stopwords = new Set(searchConfig.stopwords || []);
+  const words = new Set();
+  for (const list of Object.values(searchConfig.categories)) for (const phrase of list) normalize(phrase).split(/\s+/).forEach(word => words.add(word));
+  for (const alias of searchConfig.aliases) for (const phrase of [...alias.match, ...alias.search]) normalize(phrase).split(/\s+/).forEach(word => words.add(word));
+  const tokens = normalize(query).split(/\s+/).filter(token => token && !stopwords.has(token));
+  return tokens.map(token => {
+    if (token.length < 5 || words.has(token)) return token;
+    const close = [...words].filter(candidate => isOneTypoAway(token, candidate));
+    return close.length === 1 ? close[0] : token;
+  }).join(' ');
+}
+
+function detectCategory(query) {
+  for (const candidate of [query, correctedQuery(query)]) {
+    const normalized = normalize(candidate);
+    const alias = searchConfig.aliases
+      .filter(entry => entry.match.some(phrase => hasPhrase(normalized, phrase)))
+      .sort((a, b) => Math.max(...b.match.map(x => normalize(x).length)) - Math.max(...a.match.map(x => normalize(x).length)))[0];
+    if (alias?.category) return alias.category;
+    for (const [category, keywords] of Object.entries(searchConfig.categories)) {
+      if (keywords.some(keyword => hasPhrase(normalized, keyword))) return category;
+    }
+  }
+  return null;
+}
+
 function searchAlternatives(query) {
-  const original = String(query).trim();
+  const stopwords = new Set(searchConfig.stopwords || []);
+  const original = normalize(query).split(/\s+/).filter(token => token && !stopwords.has(token)).join(' ');
   const translated = original.toLowerCase()
     .replace(/\b(?:televisions?|smart tvs?)\b/g, 'televizor')
     .replace(/\b(?:fridges?|friges?|refrigerators?|freezers?)\b/g, 'frigorifer')
@@ -24,7 +57,13 @@ function searchAlternatives(query) {
     .replace(/\b(?:washing machines?|washers?)\b/g, 'lavatrice')
     .replace(/\b(?:dishwashers?)\b/g, 'lavastovilje')
     .replace(/\b(?:vacuum cleaners?|vacuums?)\b/g, 'fshese');
-  return [...new Set([translated, original].filter(term => normalize(term)))];
+  const normalized = normalize(query);
+  const aliases = searchConfig.aliases
+    .filter(entry => entry.match.some(phrase => hasPhrase(normalized, phrase)) || entry.match.some(phrase => hasPhrase(correctedQuery(query), phrase)))
+    .sort((a, b) => Math.max(...b.match.map(x => normalize(x).length)) - Math.max(...a.match.map(x => normalize(x).length)))
+    .flatMap(entry => entry.search);
+  const corrected = correctedQuery(query);
+  return [...new Set([original, corrected, translated, ...aliases].filter(term => normalize(term)))];
 }
 
 function decode(value = '') {
@@ -146,8 +185,31 @@ function queryMatches(title, query) {
   const normalizedTitle = normalize(title);
   return searchAlternatives(query).some(alternative => {
     const terms = normalize(alternative).split(/\s+/).filter(Boolean);
-    return terms.length > 0 && terms.every(term => normalizedTitle.includes(term));
+    const titleTerms = normalizedTitle.split(/\s+/).filter(Boolean);
+    return terms.length > 0 && terms.every(term => normalizedTitle.includes(term) || titleTerms.some(candidate => isOneTypoAway(term, candidate)));
   });
+}
+
+function isOneTypoAway(a, b) {
+  if (a.length < 5 || b.length < 5 || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else { i++; j++; }
+  }
+  return edits + (i < a.length || j < b.length ? 1 : 0) <= 1;
+}
+
+function selectStores(query) {
+  const eligible = stores.filter(store => store.enabled && store.country === 'AL');
+  const category = detectCategory(query);
+  if (!category) return { category: null, stores: eligible };
+  const groups = searchConfig.storeGroups[category] || [];
+  const selected = eligible.filter(store => (store.categories || []).some(item => groups.includes(item)));
+  return { category: selected.length ? category : null, stores: selected.length ? selected : eligible };
 }
 
 async function searchStore(store, query) {
@@ -184,7 +246,8 @@ async function searchStore(store, query) {
 }
 
 async function searchStores(query) {
-  const selected = stores.filter(store => store.enabled && store.country === 'AL');
+  const plan = selectStores(query);
+  const selected = plan.stores;
   const checkedAt = new Date().toISOString();
   const outcomes = await Promise.all(selected.map(async store => {
     try { return { store, ...(await searchStore(store, query)) }; }
@@ -193,7 +256,7 @@ async function searchStores(query) {
   const offers = outcomes.flatMap(outcome => outcome.offers);
   const storeErrors = outcomes.filter(outcome => outcome.error).map(({ store, error }) => ({ id: store.id, name: store.name, error }));
   offers.sort((a, b) => a.price - b.price);
-  return { query, total: offers.length, offers, storesChecked: selected.length, storesWithOffers: outcomes.filter(o => o.offers.length).length, storeErrors, checkedAt };
+  return { query, category: plan.category, total: offers.length, offers, storesChecked: selected.length, storesTotal: stores.filter(store => store.enabled && store.country === 'AL').length, storesWithOffers: outcomes.filter(o => o.offers.length).length, storeErrors, checkedAt };
 }
 
 // Legacy opt-in catalogue collection remains available for maintainers. Normal searches never read or write this data.

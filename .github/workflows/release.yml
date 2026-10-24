@@ -81,12 +81,10 @@ jobs:
           if (-not $application) { throw "Gjejma.exe was not produced by the desktop build." }
           $smokeLog = Join-Path $env:RUNNER_TEMP "gjejma-smoke.log"
           $env:GJEJMA_SMOKE_LOG = $smokeLog
-          $output = & $application.FullName --squirrel-firstrun --gjejma-smoke-test 2>&1
-          $exitCode = $LASTEXITCODE
-          $output | Write-Host
+          $process = Start-Process -FilePath $application.FullName -ArgumentList @("--squirrel-firstrun", "--gjejma-smoke-test") -Wait -PassThru -WindowStyle Hidden
           if (Test-Path $smokeLog) { Get-Content $smokeLog | Write-Host }
-          if ($exitCode -ne 0) { throw "The packaged Gjejma app failed its local startup check (exit $exitCode)." }
-          if ($output -notmatch "GJEJMA_SMOKE_OK") { throw "The packaged Gjejma app skipped its startup check." }
+          if ($process.ExitCode -ne 0) { throw "The packaged Gjejma app failed its local startup check (exit $($process.ExitCode))." }
+          if (-not (Test-Path $smokeLog) -or -not (Select-String -Path $smokeLog -Pattern "GJEJMA_SMOKE_OK" -Quiet)) { throw "The packaged Gjejma app skipped its startup check." }
       - name: Prepare installer
         shell: pwsh
         run: |

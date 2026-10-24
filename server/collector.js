@@ -13,7 +13,18 @@ function normalize(value = '') {
 }
 
 function hasPhrase(text, phrase) {
-  return ` ${normalize(text)} `.includes(` ${normalize(phrase)} `);
+  const textTokens = normalize(text).split(/\s+/).filter(Boolean);
+  const phraseTokens = normalize(phrase).split(/\s+/).filter(Boolean);
+  if (!phraseTokens.length) return false;
+  if (` ${textTokens.join(' ')} `.includes(` ${phraseTokens.join(' ')} `)) return true;
+  if (textTokens.length < phraseTokens.length) return false;
+  for (let start = 0; start <= textTokens.length - phraseTokens.length; start++) {
+    const prefixMatches = phraseTokens.slice(0, -1).every((token, offset) => textTokens[start + offset] === token);
+    const last = textTokens[start + phraseTokens.length - 1];
+    const suffix = last.slice(phraseTokens.at(-1).length);
+    if (prefixMatches && last.startsWith(phraseTokens.at(-1)) && /^\d/.test(suffix)) return true;
+  }
+  return false;
 }
 
 function correctedQuery(query) {
@@ -218,6 +229,25 @@ function fromHtmlCards(html, store) {
   return output;
 }
 
+function fromCsCart(html, store) {
+  const output = [];
+  const blocks = html.match(/<form\b[^>]*name=["']product_form_\d+["'][^>]*>[\s\S]*?<\/form>/gi) || [];
+  for (const block of blocks) {
+    const titleLink = block.match(/<a\b[^>]*class=["'][^"']*\bproduct-title\b[^"']*["'][^>]*>/i)?.[0];
+    const title = decode(titleLink?.match(/\btitle=["']([^"']+)["']/i)?.[1] || block.match(/<img\b[^>]*\balt=["']([^"']+)["']/i)?.[1]);
+    const url = titleLink?.match(/\bhref=["']([^"']+)["']/i)?.[1];
+    const price = block.match(/<span\b[^>]*class=["'][^"']*\bty-price-num\b[^"']*["'][^>]*>([\d.,\s]+)<\/span>/i)?.[1];
+    const sku = block.match(/name=["']product_form_(\d+)["']/i)?.[1] || '';
+    const row = productRow(store, {
+      title, url, price, currency: store.currency, sku,
+      availability: /out of stock|sold out|nuk ka(?:\s+ne)?\s+stok/i.test(block) ? 'out of stock'
+        : /in stock|ne stok|available|vetëm\s+\d+\s+produkte?\s+të\s+mbetura/i.test(block) ? 'in stock' : '',
+    });
+    if (row) output.push(row);
+  }
+  return output;
+}
+
 function queryMatches(title, query) {
   const normalizedTitle = normalize(title);
   return searchAlternatives(query).some(alternative => {
@@ -285,6 +315,7 @@ async function searchStore(store, query, filterCategory = null) {
   for (const searchTerm of searchAlternatives(query)) {
     const encoded = encodeURIComponent(searchTerm);
     const attempts = [];
+    if (store.adapter === 'cscart') attempts.push({ url: `https://${store.domain}/?dispatch=products.search&match=all&subcats=Y&pcode_from_q=Y&pshort=Y&pfull=Y&pname=Y&pkeywords=Y&search_performed=Y&q=${encoded}`, parse: (body, s) => fromCsCart(body, s) });
     if (store.adapter === 'shopify') attempts.push({ url: `https://${store.domain}/search/suggest.json?q=${encoded}&resources[type]=product&resources[limit]=20`, parse: fromShopify });
     if (store.adapter === 'woocommerce') attempts.push({ url: `https://${store.domain}/wp-json/wc/store/v1/products?search=${encoded}&per_page=100`, parse: fromWoo });
     if (store.adapter === 'shopware') attempts.push({ url: `https://${store.domain}/search?search=${encoded}`, parse: html });
@@ -319,6 +350,7 @@ async function searchStore(store, query, filterCategory = null) {
             if (Array.isArray(payload?.resources?.results?.products) || Array.isArray(payload?.products)) break;
           } catch { /* Try the public HTML search fallback. */ }
         }
+        if (store.adapter === 'cscart' && attempt.url.includes('dispatch=products.search')) break;
       } catch (error) { errors.push(error.message || 'request failed'); }
     }
   }

@@ -18,7 +18,7 @@ The website server binds to the machine's available interfaces. The Android APK 
 
 ## Search and product identity
 
-`search-config.json` defines aliases, category keywords, and the retailer groups for each category. Queries normalize punctuation and accents, drop intent words such as “price” or “buy,” expand abbreviations such as `PS5` to PlayStation 5, and allow a one-character typo when matching returned titles. Clear categories check their relevant store groups; ambiguous queries check every enabled retailer. Search results are only held in memory for that response. Product variants remain separate offers; Gjejma does not assert that similar titles are exactly the same product.
+`search-config.json` defines aliases, automatic category keywords, user-selectable category filters, and retailer groups. The website and Android app offer an all-categories option plus filters such as phones, consoles, games and accessories, TVs and audio, large and small appliances, climate, personal care, computers, mobility, and home. A selected filter narrows both the retailers checked and returned product titles. For example, `Samsung` with `phones` excludes TV and appliance listings; `PS5` with `consoles` excludes game and accessory listings. Without a selected filter, existing broad search behavior remains. Queries normalize punctuation and accents, drop intent words such as “price” or “buy,” expand abbreviations such as `PS5` to PlayStation 5, and allow a one-character typo when matching returned titles. Search results are only held in memory for that response. Product variants remain separate offers; Gjejma does not assert that similar titles are exactly the same product.
 
 ## Collection
 
@@ -37,7 +37,9 @@ Retailer layouts and search APIs vary. A store may need a dedicated adapter if i
 
 - `GET /api/health` — service and legacy catalogue counts.
 - `GET /api/shops` — shop list, enabled state, and category tags.
+- `GET /api/categories` — user-facing filter labels and product-title include/exclude rules.
 - `GET /api/search?q=ps5` — live offers, detected category, checked-store counts, and per-store errors.
+- `GET /api/search?q=samsung&category=phones` — live offers narrowed to the selected category.
 - `GET /api/products?limit=100&offset=0&q=iphone` — catalogue page.
 - `GET /api/products/:id` — one listing, current offers and recorded history.
 

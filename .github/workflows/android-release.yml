@@ -2,7 +2,10 @@ name: Android release APK
 
 on:
   push:
+    branches: [main, master]
+    paths: ["android/**", ".github/workflows/android-release.yml"]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -32,5 +35,15 @@ jobs:
       - name: Publish APK to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" Gjejma.apk --title "Gjejma $GITHUB_REF_NAME" --notes "Standalone APK for Android sideloading. Saves the product catalogue on the phone; internet is needed only to refresh shop feeds. Debug-signed for sideloading, not Play Store distribution."
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ] && [ "$REF_TYPE" = "tag" ]; then
+            release_tag="$REF_NAME"
+          else
+            release_tag="android-$RUN_NUMBER"
+          fi
+          gh release create "$release_tag" Gjejma.apk --title "Gjejma Android $release_tag" --latest --notes "Standalone Android APK. No Gjejma server or computer is required. Refresh public shop feeds over the internet; product catalog is stored on the phone and searches work offline. Debug-signed for sideloading, not Play Store distribution."
 

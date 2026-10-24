@@ -93,6 +93,43 @@ async function fetchText(address) {
   return response.text();
 }
 
+async function fetchNeptunSearch(store, term) {
+  const origin = new URL(store.url).origin;
+  const response = await fetch(new URL('/Product/SearchProductsAutocomplete', origin), {
+    method: 'POST',
+    signal: AbortSignal.timeout(TIMEOUT),
+    headers: {
+      'user-agent': USER_AGENT,
+      accept: 'application/json, text/plain, */*',
+      'content-type': 'application/json;charset=UTF-8',
+      origin,
+      referer: `${origin}/`,
+      'FROM-ANGULAR': 'true',
+      'x-requested-with': 'XMLHttpRequest',
+    },
+    body: JSON.stringify({ term, page: 1, itemsPerPage: 200 }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+function fromNeptun(data, store) {
+  const products = data?.list || data?.ProductsResult?.results || [];
+  if (!Array.isArray(products)) return [];
+  return products.filter(product => product.Type == null || product.Type === 1).map(product => {
+    const price = [product.WebshopDiscountPrice, product.ActualPrice, product.DiscountPrice, product.RegularPrice]
+      .map(parsePrice).find(amount => amount != null);
+    return productRow(store, {
+      title: product.Title || product.ShortTitle,
+      url: product.Link || product.Url,
+      price,
+      currency: store.currency,
+      availability: product.AvailableWebshop == null ? '' : product.AvailableWebshop ? 'in stock' : 'out of stock',
+      sku: product.CodeNumber || product.ProductCode || product.Barcode || product.Id,
+    });
+  }).filter(Boolean);
+}
+
 function productRow(store, { title, url, price, currency, availability, sku }) {
   title = String(title || '').trim();
   const amount = parsePrice(price);
@@ -225,6 +262,16 @@ function matchesUserCategory(title, category) {
 
 async function searchStore(store, query, filterCategory = null) {
   const errors = [];
+  if (store.adapter === 'neptun') {
+    for (const searchTerm of searchAlternatives(query)) {
+      try {
+        const results = fromNeptun(await fetchNeptunSearch(store, searchTerm), store)
+          .filter(row => queryMatches(row.title, query) && matchesUserCategory(row.title, filterCategory));
+        if (results.length) return { offers: results, error: null };
+      } catch (error) { errors.push(error.message || 'request failed'); }
+    }
+    return { offers: [], error: [...new Set(errors)].join(', ') || 'No matching public product listing found' };
+  }
   const html = (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)];
   for (const searchTerm of searchAlternatives(query)) {
     const encoded = encodeURIComponent(searchTerm);

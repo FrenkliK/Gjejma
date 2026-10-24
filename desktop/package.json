@@ -1,0 +1,19 @@
+{
+  "name": "gjejma-desktop",
+  "productName": "Gjejma",
+  "version": "1.0.0",
+  "description": "Krahasim live i çmimeve në dyqanet online shqiptare",
+  "author": "Kontribuesit e Gjejma-s",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "make": "electron-forge make"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "8.0.1",
+    "@electron-forge/maker-squirrel": "8.0.1",
+    "electron": "45.0.0"
+  }
+}
+

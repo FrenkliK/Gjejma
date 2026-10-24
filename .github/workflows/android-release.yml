@@ -45,5 +45,5 @@ jobs:
           else
             release_tag="android-$RUN_NUMBER"
           fi
-          gh release create "$release_tag" Gjejma.apk --title "Gjejma Android $release_tag" --latest --notes "Standalone Android APK. No Gjejma server or computer is required. Refresh public shop feeds over the internet; product catalog is stored on the phone and searches work offline. Debug-signed for sideloading, not Play Store distribution."
+          gh release create "$release_tag" Gjejma.apk --title "Gjejma Android $release_tag" --latest --notes "Standalone Android APK. No Gjejma server, computer, account, or repository download is required. Searches Albanian stores live from the phone; search results are not stored. Internet is required. Debug-signed for sideloading, not Play Store distribution."
 

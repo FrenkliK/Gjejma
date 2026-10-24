@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = Page) {
-                    GjejmaScreen { link ->
+                    GjejmaScreen(applicationContext) { link ->
                         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) }
                     }
                 }
@@ -54,19 +54,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private const val STORE_DIRECTORY = """[
- {"id":"3vfejzo","name":"3V Fejzo","domain":"3vfejzo.al","url":"https://3vfejzo.al/products/telefona","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
- {"id":"red-store","name":"Red Store","domain":"redstore.al","url":"https://redstore.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
- {"id":"smartphoneshop","name":"The Smartphone Shop","domain":"smartphoneshop.al","url":"https://smartphoneshop.al/","enabled":true,"adapter":"jsonld","country":"AL","currency":"ALL"},
- {"id":"bss","name":"BSS Buy Smart Store","domain":"bss.com.al","url":"https://bss.com.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
- {"id":"gotech","name":"GoTech Electronics","domain":"gotech.al","url":"https://gotech.al/product-category/telefonia/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
- {"id":"phoneshopalbania","name":"Phone Shop Albania","domain":"phoneshopalbania.al","url":"https://phoneshopalbania.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
- {"id":"redline","name":"Redline","domain":"redline.com.al","url":"https://redline.com.al/","enabled":true,"adapter":"shopify","country":"AL","currency":"ALL"},
- {"id":"smartstore","name":"Smart Store","domain":"smartstore.al","url":"https://smartstore.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"EUR"},
- {"id":"agorai","name":"Agorai","domain":"agorai.al","url":"https://www.agorai.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
- {"id":"shoptech","name":"ShopTech","domain":"shoptech.al","url":"https://shoptech.al/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"},
- {"id":"boostmobile","name":"Boost Mobile","domain":"boostmobile.al","url":"https://boostmobile.al/en/","enabled":true,"adapter":"woocommerce","country":"AL","currency":"ALL"}
-]"""
 private data class Store(val id: String, val name: String, val domain: String, val url: String, val adapter: String, val currency: String)
 private data class Offer(val store: String, val domain: String, val price: Double, val currency: String, val availability: String, val url: String, val checkedAt: Long)
 private suspend fun fetchText(address: String): String = withContext(Dispatchers.IO) {
@@ -77,8 +64,9 @@ private suspend fun fetchText(address: String): String = withContext(Dispatchers
     try { if (c.responseCode !in 200..299) error("HTTP ${c.responseCode}"); c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
 }
 
-private suspend fun storeDirectory(): List<Store> = withContext(Dispatchers.IO) {
-    val a = JSONArray(STORE_DIRECTORY)
+private suspend fun storeDirectory(context: android.content.Context): List<Store> = withContext(Dispatchers.IO) {
+    val raw = context.assets.open("stores.json").bufferedReader().use { it.readText() }
+    val a = JSONArray(raw)
     buildList {
         for (i in 0 until a.length()) {
             val s = a.getJSONObject(i)
@@ -112,14 +100,33 @@ private fun safeProduct(store: Store, title: String, link: String, price: Double
     return JSONObject().put("key", "${store.id}:$identity").put("title", title).put("offer", offer)
 }
 
-private fun normalize(s: String) = java.text.Normalizer.normalize(s.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
+private fun normalize(s: String) = java.text.Normalizer.normalize(s.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("\\bbiciklet\\b"), "biciklete").replace(Regex("[^a-z0-9]+"), " ").trim()
+
+private fun searchAlternatives(query: String): List<String> {
+    val translated = query.lowercase(Locale.ROOT)
+        .replace(Regex("\\b(televisions?|smart tvs?)\\b"), "televizor")
+        .replace(Regex("\\b(fridges?|friges?|refrigerators?|freezers?)\\b"), "frigorifer")
+        .replace(Regex("\\btoasters?\\b"), "tostjere")
+        .replace(Regex("\\b(electric bikes?|e-bikes?|ebikes?|electric bicycles?)\\b"), "biciklete elektrike")
+        .replace(Regex("\\b(bikes?|bicycles?)\\b"), "biciklete")
+        .replace(Regex("\\b(electric scooters?|e-scooters?)\\b"), "skuter elektrik")
+        .replace(Regex("\\bmicrowaves?\\b"), "mikrovale")
+        .replace(Regex("\\b(washing machines?|washers?)\\b"), "lavatrice")
+        .replace(Regex("\\bdishwashers?\\b"), "lavastovilje")
+        .replace(Regex("\\b(vacuum cleaners?|vacuums?)\\b"), "fshese")
+    return listOf(translated, query.trim()).distinct().filter(String::isNotBlank)
+}
 
 private fun queryUrl(store: Store, query: String, route: String = ""): String {
     val encoded = java.net.URLEncoder.encode(query, "UTF-8")
     return when {
         store.adapter == "shopify" && route.isEmpty() -> "https://${store.domain}/search/suggest.json?q=$encoded&resources[type]=product&resources[limit]=20"
         route == "woo" -> "https://${store.domain}/wp-json/wc/store/v1/products?search=$encoded&per_page=30"
-        route == "search" -> "https://${store.domain}/search?q=$encoded"
+        route == "search" -> if (store.adapter == "shopware") "https://${store.domain}/search?search=$encoded" else "https://${store.domain}/search?q=$encoded"
+        route == "shopsearch" -> "https://${store.domain}/search?search=$encoded"
+        route == "query" -> "https://${store.domain}/?q=$encoded"
+        route == "opencart" -> "https://${store.domain}/index.php?route=product/search&search=$encoded"
+        route == "products" -> "https://${store.domain}/products?search=$encoded"
         route == "store" -> "${store.url}${if (store.url.contains('?')) '&' else '?'}s=$encoded&post_type=product"
         else -> "https://${store.domain}/?s=$encoded&post_type=product"
     }
@@ -127,9 +134,9 @@ private fun queryUrl(store: Store, query: String, route: String = ""): String {
 
 private fun parseSearchResponse(store: Store, raw: String, query: String): List<Pair<String, Offer>> {
     val found = mutableListOf<Pair<String, Offer>>()
-    val terms = normalize(query).split(" ").filter(String::isNotBlank)
+    val variants = searchAlternatives(query).map { normalize(it).split(" ").filter(String::isNotBlank) }
     fun add(title: String, link: String, price: Double?, currency: String, stock: String, identity: String) {
-        if (price == null || title.isBlank() || !terms.all(normalize(title)::contains)) return
+        if (price == null || title.isBlank() || variants.none { terms -> terms.all(normalize(title)::contains) }) return
         val offer = safeProduct(store, title, link, price, currency, stock, identity) ?: return
         val o = offer.getJSONObject("offer")
         found += title to Offer(store.name, store.domain, o.getDouble("price"), o.getString("currency"), o.getString("availability"), o.getString("url"), o.getLong("checkedAt"))
@@ -178,19 +185,26 @@ private fun parseSearchResponse(store: Store, raw: String, query: String): List<
 }
 
 private suspend fun searchStore(store: Store, query: String): Pair<List<Pair<String, Offer>>, String?> {
-    val routes = if (store.adapter == "shopify") listOf("", "search", "store") else listOf("woo", "", "store", "search")
     val errors = mutableListOf<String>()
-    for (route in routes) {
-        try {
-            val raw = fetchText(queryUrl(store, query, route))
-            val offers = parseSearchResponse(store, raw, query)
-            if (offers.isNotEmpty()) return offers to null
-        } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
+    val routes = when (store.adapter) {
+        "shopify" -> listOf("", "search", "store")
+        "woocommerce" -> listOf("woo", "", "search", "store")
+        "shopware" -> listOf("search", "query", "store")
+        else -> listOf("search", "shopsearch", "query", "products", "opencart", "store")
+    }
+    for (searchTerm in searchAlternatives(query)) {
+        for (route in routes) {
+            try {
+                val raw = fetchText(queryUrl(store, searchTerm, route))
+                val offers = parseSearchResponse(store, raw, query)
+                if (offers.isNotEmpty()) return offers to null
+            } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
+        }
     }
     return emptyList<Pair<String, Offer>>() to (errors.distinct().joinToString(", ").ifBlank { "Nuk u gjet listim publik që përputhet" })
 }
 @Composable
-private fun GjejmaScreen(onOpen: (String) -> Unit) {
+private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf(emptyList<Pair<String, Offer>>()) }
     var message by remember { mutableStateOf("Kërkimi kontrollon dyqanet drejtpërdrejt.") }
@@ -204,7 +218,7 @@ private fun GjejmaScreen(onOpen: (String) -> Unit) {
         busy = true; results = emptyList(); message = "Po kërkoj live në dyqanet shqiptare…"
         scope.launch {
             try {
-                val stores = storeDirectory()
+                val stores = storeDirectory(context)
                 val answers = coroutineScope { stores.map { store -> async { store to searchStore(store, term) } }.awaitAll() }
                 results = answers.flatMap { it.second.first }.sortedBy { it.second.price }
                 val foundStores = answers.count { it.second.first.isNotEmpty() }
@@ -217,12 +231,12 @@ private fun GjejmaScreen(onOpen: (String) -> Unit) {
 
     Column(Modifier.fillMaxSize().background(Page).padding(horizontal = 18.dp, vertical = 18.dp)) {
         Text("gjejma.", color = Forest, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-        Text("Çmime live nga dyqanet shqiptare.", color = Muted, fontSize = 13.sp)
+        Text("Çmime live nga 40+ dyqane shqiptare.", color = Muted, fontSize = 13.sp)
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(query, { query = it }, Modifier.weight(1f), label = { Text("Kërko produkt") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), shape = RoundedCornerShape(12.dp))
-            Spacer(Modifier.width(8.dp)); Button(onClick = { search() }, enabled = !busy, shape = RoundedCornerShape(12.dp)) { Text("Gjej") }
+            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("Kërko produkt") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), shape = RoundedCornerShape(12.dp))
         }
+        Text("Kërko çdo kategori: TV · frigorifer · toster · biçikletë elektrike · laptop", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = { search() }, enabled = !busy && query.trim().length >= 2, shape = RoundedCornerShape(12.dp)) {

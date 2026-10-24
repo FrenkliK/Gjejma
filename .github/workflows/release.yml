@@ -8,6 +8,7 @@ on:
       - "desktop/**"
       - "server/**"
       - "web/**"
+      - "package.json"
       - ".github/workflows/release.yml"
     tags: ["v*"]
   workflow_dispatch:

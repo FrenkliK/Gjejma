@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val packagedVersionCode = System.getenv("GJEJMA_VERSION_CODE")?.toIntOrNull() ?: 1
+val packagedVersionName = System.getenv("GJEJMA_VERSION_NAME") ?: "1.0.0"
+
 android {
     namespace = "al.gjejma.app"
     compileSdk = 36
@@ -11,8 +14,8 @@ android {
         applicationId = "al.gjejma.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = packagedVersionCode
+        versionName = packagedVersionName
     }
     buildFeatures { compose = true }
 }

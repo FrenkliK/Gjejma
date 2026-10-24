@@ -1,4 +1,5 @@
 node_modules/
+desktop/out/
 server/db.json
 server/db.json.tmp
 server/collector.lock
@@ -7,3 +8,4 @@ android/local.properties
 android/**/build/
 .env
 *.log
+

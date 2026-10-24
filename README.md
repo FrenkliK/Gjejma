@@ -22,14 +22,14 @@ Every push to `main` builds an APK under **Actions → Android app** (artifact e
 3. Double-click `start.bat` on Windows, or run `sh ./start.sh` on macOS/Linux.
 4. Open `http://localhost:3000`. Each search queries the enabled shop websites live; the server does not start a scheduled catalogue collection by default.
 
-Search results appear as soon as the enabled shops respond. Each shop request has a timeout, and the UI shows which shops returned offers and errors for shops it could not search. Store search pages vary, so a retailer may need a dedicated adapter if its site does not expose a compatible public search endpoint or product markup.
+Search results appear as soon as the enabled shops respond. The directory includes 40+ Albanian online retailers and marketplaces spanning phones, computers, TVs, large and small appliances, home and garden, gaming, scooters and bicycles, and general goods. Every enabled source is queried for the product name regardless of category, so you can search for a toaster, refrigerator, or e-bike the same way you search for a phone. Each shop request has a timeout, and the UI shows which shops returned offers and errors for shops it could not search. Store search pages vary, so a retailer may need a dedicated adapter if its site does not expose a compatible public search endpoint or product markup. No list can guarantee literally every Albanian online shop; contributors can add stores in `server/stores.json`.
 
 ## Features
 
 - Search shop listings and sort by price or retailer.
 - Open the original listing on the seller site.
 - See reported availability and the time each retailer responded.
-- Inspect 27 configured store candidates; disabled candidates are not treated as confirmed sources.
+- Search across 40+ configured Albanian retailers and marketplaces, including general stores and appliance, computer, gaming, and mobility shops.
 - Website users can save searches and price targets locally in their browser.
 - Android users search stores directly from their phone; no server, computer, or account is needed.
 - The backend exposes health, shop status, products, offers, and price-history APIs.

@@ -52,6 +52,10 @@ On Windows, double-click `start.bat`; on macOS/Linux, run `sh ./start.sh`. Or ru
 
 The live search adapter tries WooCommerce Store API search, Shopify product suggestions, retailer search pages, JSON-LD product data, and common product-card markup. It does not use `robots.txt` as a blocker for retailers the project is authorized to query. It reports real access errors and does not bypass logins, CAPTCHAs, or anti-bot protections. The old full-catalogue collector is only an optional legacy utility; it is not run by normal website searches. Set `AUTO_COLLECT=true` to opt into that legacy utility.
 
+### Optional category filters
+
+Search a product or brand, then choose **Të gjitha** or a category chip to narrow the results. Categories follow familiar Albanian retailer departments such as Telefonia, TV & Audio, Ftohje & Ngrohje, Kompjutera, and appliance departments. For example, search `Samsung` and select **Telefona** to remove Samsung TVs and appliances; search `PS5` and select **Konzola** to leave out games and accessories. With **Të gjitha**, Gjejma keeps the broad live search. Category matching uses product-title clues, so a store with vague titles may still need a dedicated adapter or improved category rules.
+
 ## Repository layout
 
 ```text
@@ -72,12 +76,14 @@ collect.bat                   manual backend catalogue refresh
 
 - `GET /api/health`
 - `GET /api/shops`
+- `GET /api/categories`
 - `GET /api/search?q=iphone`
+- `GET /api/search?q=samsung&category=phones`
 - `GET /api/products/:id`
 - `GET /api/history/:id`
 - `POST /api/collect` (local server only)
 
-Set `PORT` to change the web server port. Live searches do not use or update `server/db.json`. The legacy collection is disabled by default; `AUTO_COLLECT=true` opts into it.
+Set `PORT` to change the web server port. The optional `category` parameter accepts a key from `/api/categories` and filters both retailer selection and product titles. Live searches do not use or update `server/db.json`. The legacy collection is disabled by default; `AUTO_COLLECT=true` opts into it.
 
 ## License
 

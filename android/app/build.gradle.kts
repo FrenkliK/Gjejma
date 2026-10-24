@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "al.gjejma.app"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "al.gjejma.app"

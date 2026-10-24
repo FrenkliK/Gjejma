@@ -1,37 +1,8 @@
-const stores=[
-  {name:'3V Fejzo',domain:'3vfejzo.al',mark:'3V',status:'Candidate'},
-  {name:'Red Store',domain:'redstore.al',mark:'RS',status:'Candidate'},
-  {name:'The Smartphone Shop',domain:'smartphoneshop.al',mark:'TS',status:'Candidate'},
-  {name:'BSS Buy Smart Store',domain:'bss.com.al',mark:'BSS',status:'Candidate'},
-  {name:'Vodafone eShop',domain:'eshop.vodafone.al',mark:'V',status:'Candidate'},
-  {name:'GoTech Electronics',domain:'gotech.al',mark:'GT',status:'Candidate'},
-  {name:'Phone Shop Albania',domain:'phoneshopalbania.al',mark:'PS',status:'Candidate'},
-  {name:'Redline',domain:'redline.com.al',mark:'R',status:'Candidate'},
-  {name:'Smart Store',domain:'smartstore.al',mark:'SS',status:'Candidate'},
-  {name:'Foleja',domain:'foleja.al',mark:'F',status:'Candidate'},
-  {name:'Agorai',domain:'agorai.al',mark:'A',status:'Candidate'},
-  {name:'ShopTech',domain:'shoptech.al',mark:'ST',status:'Candidate'},
-  {name:'Boost Mobile',domain:'boostmobile.al',mark:'BM',status:'Candidate'},
-  {name:'Molla Stores',domain:'mollastores.com',mark:'M',status:'Candidate'},
-  {name:'Globe',domain:'globe.al',mark:'G',status:'Candidate'},
-  {name:'Neptun',domain:'neptun.al',mark:'N',status:'Candidate'},
-  {name:'Celular.al',domain:'celular.al',mark:'C',status:'Candidate'},
-  {name:'Shpresa AL',domain:'shpresa.al',mark:'SH',status:'Candidate'},
-  {name:'Aza Electronics',domain:'aza-electronics.com',mark:'AZ',status:'Candidate'},
-  {name:'American Computers',domain:'ac.com.al',mark:'AC',status:'Candidate'},
-  {name:'AlbaGame',domain:'albagame.al',mark:'AG',status:'Candidate'},
-  {name:'Nova Electronics',domain:'nova-electronics.al',mark:'N',status:'Candidate'},
-  {name:'Ozone',domain:'ozone.al',mark:'O',status:'Candidate'},
-  {name:'Tigo Albania',domain:'tigo.al',mark:'T',status:'Candidate'},
-  {name:'Xito Shop',domain:'xitoshop.com',mark:'X',status:'Candidate'},
-  {name:'PC Store Albania',domain:'shop.pcstore.al',mark:'PC',status:'Candidate'},
-  {name:"Geni's Computers",domain:'genispc.al',mark:'GC',status:'Candidate'}
-];
 const $=s=>document.querySelector(s), fmt=(n,c='ALL')=>new Intl.NumberFormat('sq-AL').format(n)+' '+(c==='ALL'?'L':c), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));let saved=JSON.parse(localStorage.getItem('gjejma-saved')||'[]'), current='iPhone 18 Pro Max';
-async function renderShops(){try{const response=await fetch('/api/shops');const {stores:shops}=await response.json();$('#shopGrid').innerHTML=shops.map(s=>`<div class="shop-item" title="${esc(s.note||'Kontrollohet drejtpërdrejt kur kërkon produkt')}\"><span class="shop-mark">${s.name.split(/\s+/).map(x=>x[0]).join('').slice(0,3).toUpperCase()}</span><span><b>${s.name}</b><small>${s.domain} · ${s.enabled?'kërkim live':'në verifikim'}</small></span></div>`).join('')}catch{$('#shopGrid').innerHTML=stores.map(s=>`<div class="shop-item"><span class="shop-mark">${s.mark}</span><span><b>${s.name}</b><small>${s.domain} · në direktori</small></span></div>`).join('')}}
+async function renderShops(){try{const response=await fetch('/api/shops');const {stores:shops}=await response.json(),active=shops.filter(s=>s.enabled);$('#activeShopCount').textContent=active.length;$('#shopGrid').innerHTML=shops.map(s=>`<div class="shop-item" title="${esc(s.note||'Kontrollohet drejtpërdrejt kur kërkon produkt')}\"><span class="shop-mark">${s.name.split(/\s+/).map(x=>x[0]).join('').slice(0,3).toUpperCase()}</span><span><b>${esc(s.name)}</b><small>${esc(s.domain)} · ${s.enabled?'live':'në verifikim'}${s.categories?.length?' · '+esc(s.categories.slice(0,2).join(', ')):''}</small></span></div>`).join('')}catch{$('#shopGrid').innerHTML='<div class="empty">Nuk u ngarkua lista e dyqaneve.</div>'}}
 async function render(){const term=current.toLowerCase().trim();let rows=[],liveData=null;$('#resultCount').textContent=term.length>=2?'Duke kërkuar live…':'Shkruaj të paktën 2 shkronja';try{if(term.length>=2){const response=await fetch('/api/search?q='+encodeURIComponent(current),{cache:'no-store'});if(!response.ok)throw new Error('search');liveData=await response.json();rows=liveData.offers||[];rows=rows.map(o=>({...o,verified:`Kontrolluar ${new Date(o.checkedAt||liveData.checkedAt).toLocaleTimeString('sq-AL')}`}))}}catch{$('#offers').innerHTML='<div class="empty"><b>Nuk u lidhëm me serverin.</b>Sigurohu që Gjejma po ekzekutohet dhe provo përsëri.</div>';return}
   rows=[...rows];const currencyOrder=c=>c==='ALL'?0:c==='EUR'?1:2;if($('#sort').value==='store')rows.sort((a,b)=>currencyOrder(a.currency)-currencyOrder(b.currency)||a.currency.localeCompare(b.currency)||a.store.localeCompare(b.store));else rows.sort((a,b)=>currencyOrder(a.currency)-currencyOrder(b.currency)||a.currency.localeCompare(b.currency)||a.price-b.price);
-  $('#resultTitle').childNodes[0].textContent=current+' ';$('#resultCount').textContent=`${rows.length} oferta · ${liveData?.storesWithOffers||0}/${liveData?.storesChecked||0} dyqane u përgjigjën · live ${liveData?.checkedAt?new Date(liveData.checkedAt).toLocaleTimeString('sq-AL'):''}`;
+  $('#resultTitle').childNodes[0].textContent=current+' ';$('#resultCount').textContent=`${rows.length} oferta · ${liveData?.storesWithOffers||0}/${liveData?.storesChecked||0} dyqane me oferta · live ${liveData?.checkedAt?new Date(liveData.checkedAt).toLocaleTimeString('sq-AL'):''}`;
   if(!rows.length){const issues=(liveData?.storeErrors||[]).slice(0,5).map(e=>`${esc(e.name)}: ${esc(e.error)}`).join('<br>');$('#offers').innerHTML=`<div class="empty"><b>Nuk u gjetën oferta live</b>Provo emrin e plotë ose kontrollo më vonë.${issues?`<br><br><small>${issues}</small>`:''}</div>`;$('#bestPrice').textContent='—';$('#storeCount').textContent='0';return}
   const best=rows[0],shops=new Set(rows.map(r=>r.store)).size;$('#bestPrice').textContent=fmt(best.price,best.currency);$('#storeCount').textContent=shops;
   $('#offers').innerHTML=rows.map((r,i)=>`<article class="offer"><div class="store-id"><span class="store-logo">${esc(r.mark||r.store.slice(0,2).toUpperCase())}</span><span><span class="store-name">${esc(r.store)}</span><span class="store-domain">${esc(r.domain||new URL(r.url).hostname)}</span></span></div><div class="price-block"><strong>${fmt(r.price,r.currency)}</strong><small title="${esc(r.title)}">${esc(r.title)}</small></div><div class="availability ${r.availability==='in_stock'?'':'unconfirmed'}"><span class="avail-dot"></span>${({in_stock:'Në stok',out_of_stock:'Jashtë stokut',preorder:'Paraporosi',unknown:'Stoku i panjohur'})[r.availability]||'Stoku i panjohur'}</div><a class="offer-link" href="${esc(r.url)}" target="_blank" rel="noopener">Shiko ofertën <span>↗</span></a><div class="offer-note">${esc(r.verified)} · <b>Konfirmo çmimin dhe stokun te shitësi.</b></div></article>`).join('');checkAlerts(rows);

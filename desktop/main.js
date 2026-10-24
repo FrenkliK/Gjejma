@@ -77,6 +77,7 @@ async function start() {
   const localUrl = await startBackend();
   if (smokeTest) {
     await runSmokeTest(localUrl);
+    if (process.env.GJEJMA_SMOKE_LOG) fs.appendFileSync(process.env.GJEJMA_SMOKE_LOG, 'GJEJMA_SMOKE_OK\n');
     console.log('GJEJMA_SMOKE_OK');
     server.close();
     server = null;

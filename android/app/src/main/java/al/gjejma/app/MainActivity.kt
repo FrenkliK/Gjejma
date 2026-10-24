@@ -247,7 +247,8 @@ private fun queryUrl(store: Store, query: String, route: String = ""): String {
     val encoded = java.net.URLEncoder.encode(query, "UTF-8")
     return when {
         store.adapter == "shopify" && route.isEmpty() -> "https://${store.domain}/search/suggest.json?q=$encoded&resources[type]=product&resources[limit]=20"
-        route == "woo" -> "https://${store.domain}/wp-json/wc/store/v1/products?search=$encoded&per_page=30"
+        route == "woo" -> "https://${store.domain}/wp-json/wc/store/v1/products?search=$encoded&per_page=100"
+        route == "wpsearch" -> "https://${store.domain}/?s=$encoded"
         route == "search" -> if (store.adapter == "shopware") "https://${store.domain}/search?search=$encoded" else "https://${store.domain}/search?q=$encoded"
         route == "shopsearch" -> "https://${store.domain}/search?search=$encoded"
         route == "query" -> "https://${store.domain}/?q=$encoded"
@@ -331,18 +332,23 @@ private fun parseNeptunResponse(store: Store, raw: String, query: String, config
 
 private suspend fun searchStore(store: Store, query: String, config: JSONObject, filterCategory: String?): Pair<List<Pair<String, Offer>>, String?> {
     val errors = mutableListOf<String>()
+    var responded = false
     if (store.adapter == "neptun") {
         for (searchTerm in searchAlternatives(query, config)) {
             try {
-                val offers = parseNeptunResponse(store, fetchNeptunSearch(store, searchTerm), query, config, filterCategory)
+                val raw = fetchNeptunSearch(store, searchTerm)
+                responded = true
+                val offers = parseNeptunResponse(store, raw, query, config, filterCategory)
                 if (offers.isNotEmpty()) return offers to null
             } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
         }
-        return emptyList<Pair<String, Offer>>() to (errors.distinct().joinToString(", ").ifBlank { "Nuk u gjet listim publik që përputhet" })
+        val useful = errors.distinct().filterNot { it == "HTTP 404" }
+        val error = when { responded -> null; useful.isNotEmpty() -> useful.joinToString(", "); errors.isNotEmpty() -> "Nuk u gjet endpoint publik kërkimi"; else -> null }
+        return emptyList<Pair<String, Offer>>() to error
     }
     val routes = when (store.adapter) {
         "shopify" -> listOf("", "search", "store")
-        "woocommerce" -> listOf("woo", "", "search", "store")
+        "woocommerce" -> listOf("woo", "wpsearch", "", "search", "store")
         "shopware" -> listOf("search", "query", "store")
         else -> listOf("search", "shopsearch", "query", "products", "opencart", "store")
     }
@@ -350,12 +356,21 @@ private suspend fun searchStore(store: Store, query: String, config: JSONObject,
         for (route in routes) {
             try {
                 val raw = fetchText(queryUrl(store, searchTerm, route))
+                responded = true
                 val offers = parseSearchResponse(store, raw, query, config, filterCategory)
                 if (offers.isNotEmpty()) return offers to null
+                if (store.adapter == "woocommerce" && route == "woo" && raw.trimStart().startsWith("[") && runCatching { JSONArray(raw) }.isSuccess) break
+                if (store.adapter == "shopify" && route.isEmpty()) {
+                    val root = runCatching { JSONObject(raw) }.getOrNull()
+                    val products = root?.optJSONObject("resources")?.optJSONObject("results")?.optJSONArray("products") ?: root?.optJSONArray("products")
+                    if (products != null) break
+                }
             } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
         }
     }
-    return emptyList<Pair<String, Offer>>() to (errors.distinct().joinToString(", ").ifBlank { "Nuk u gjet listim publik që përputhet" })
+    val useful = errors.distinct().filterNot { it == "HTTP 404" }
+    val error = when { responded -> null; useful.isNotEmpty() -> useful.joinToString(", "); errors.isNotEmpty() -> "Nuk u gjet endpoint publik kërkimi"; else -> null }
+    return emptyList<Pair<String, Offer>>() to error
 }
 @Composable
 private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> Unit) {
@@ -377,7 +392,9 @@ private fun GjejmaScreen(context: android.content.Context, onOpen: (String) -> U
                 val directory = storeDirectory(context)
                 val config = loadSearchConfig(context)
                 val plan = selectStores(term, directory, config, categoryFilter)
-                val answers = coroutineScope { plan.stores.map { store -> async { store to searchStore(store, term, config, plan.filterCategory) } }.awaitAll() }
+                val answers = plan.stores.chunked(6).flatMap { batch ->
+                    coroutineScope { batch.map { store -> async { store to searchStore(store, term, config, plan.filterCategory) } }.awaitAll() }
+                }
                 results = answers.flatMap { it.second.first }.sortedBy { it.second.price }
                 val foundStores = answers.count { it.second.first.isNotEmpty() }
                 val errors = answers.filter { it.second.second != null }.take(4).joinToString("\n") { "${it.first.name}: ${it.second.second}" }

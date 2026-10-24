@@ -586,6 +586,31 @@
     ]
   },
   {
+    "id": "supermart",
+    "name": "SuperMart",
+    "domain": "supermart.al",
+    "url": "https://supermart.al/",
+    "enabled": true,
+    "adapter": "cscart",
+    "country": "AL",
+    "currency": "ALL",
+    "categories": [
+      "general",
+      "marketplace",
+      "electronics",
+      "phones",
+      "computers",
+      "gaming",
+      "tv",
+      "appliances",
+      "home",
+      "sports",
+      "clothing",
+      "bikes",
+      "scooters"
+    ]
+  },
+  {
     "id": "aladini",
     "name": "Aladini",
     "domain": "aladini.al",

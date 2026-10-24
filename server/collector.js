@@ -8,7 +8,23 @@ const TIMEOUT = 12000;
 const USER_AGENT = 'Gjejma/1.1 (Albanian price comparison; https://github.com/FrenkliK/Gjejma)';
 
 function normalize(value = '') {
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\bbiciklet\b/g, 'biciklete').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function searchAlternatives(query) {
+  const original = String(query).trim();
+  const translated = original.toLowerCase()
+    .replace(/\b(?:televisions?|smart tvs?)\b/g, 'televizor')
+    .replace(/\b(?:fridges?|friges?|refrigerators?|freezers?)\b/g, 'frigorifer')
+    .replace(/\btoasters?\b/g, 'tostjere')
+    .replace(/\b(?:electric bikes?|e-bikes?|ebikes?|electric bicycles?)\b/g, 'biciklete elektrike')
+    .replace(/\b(?:bikes?|bicycles?)\b/g, 'biciklete')
+    .replace(/\b(?:electric scooters?|e-scooters?)\b/g, 'skuter elektrik')
+    .replace(/\bmicrowaves?\b/g, 'mikrovale')
+    .replace(/\b(?:washing machines?|washers?)\b/g, 'lavatrice')
+    .replace(/\b(?:dishwashers?)\b/g, 'lavastovilje')
+    .replace(/\b(?:vacuum cleaners?|vacuums?)\b/g, 'fshese');
+  return [...new Set([translated, original].filter(term => normalize(term)))];
 }
 
 function decode(value = '') {
@@ -127,29 +143,41 @@ function fromHtmlCards(html, store) {
 }
 
 function queryMatches(title, query) {
-  const terms = normalize(query).split(/\s+/).filter(Boolean);
   const normalizedTitle = normalize(title);
-  return terms.length > 0 && terms.every(term => normalizedTitle.includes(term));
+  return searchAlternatives(query).some(alternative => {
+    const terms = normalize(alternative).split(/\s+/).filter(Boolean);
+    return terms.length > 0 && terms.every(term => normalizedTitle.includes(term));
+  });
 }
 
 async function searchStore(store, query) {
-  const encoded = encodeURIComponent(query);
   const errors = [];
-  const attempts = [];
-  if (store.adapter === 'shopify') {
-    attempts.push({ url: `https://${store.domain}/search/suggest.json?q=${encoded}&resources[type]=product&resources[limit]=20`, parse: fromShopify });
-  }
-  attempts.push({ url: `https://${store.domain}/wp-json/wc/store/v1/products?search=${encoded}&per_page=30`, parse: fromWoo });
-  attempts.push({ url: `https://${store.domain}/?s=${encoded}&post_type=product`, parse: (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)] });
-  attempts.push({ url: `${store.url}${store.url.includes('?') ? '&' : '?'}s=${encoded}&post_type=product`, parse: (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)] });
-  attempts.push({ url: `https://${store.domain}/search?q=${encoded}`, parse: (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)] });
-
-  for (const attempt of attempts) {
-    try {
-      const body = await fetchText(attempt.url);
-      const found = attempt.parse(body, store).filter(row => queryMatches(row.title, query));
-      if (found.length) return { offers: found, error: null };
-    } catch (error) { errors.push(error.message || 'request failed'); }
+  const html = (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)];
+  for (const searchTerm of searchAlternatives(query)) {
+    const encoded = encodeURIComponent(searchTerm);
+    const attempts = [];
+    if (store.adapter === 'shopify') attempts.push({ url: `https://${store.domain}/search/suggest.json?q=${encoded}&resources[type]=product&resources[limit]=20`, parse: fromShopify });
+    if (store.adapter === 'woocommerce') attempts.push({ url: `https://${store.domain}/wp-json/wc/store/v1/products?search=${encoded}&per_page=30`, parse: fromWoo });
+    if (store.adapter === 'shopware') attempts.push({ url: `https://${store.domain}/search?search=${encoded}`, parse: html });
+    attempts.push({ url: `https://${store.domain}/search?q=${encoded}`, parse: html });
+    if (store.adapter === 'generic') attempts.push({ url: `https://${store.domain}/search?search=${encoded}`, parse: html });
+    attempts.push({ url: `https://${store.domain}/?s=${encoded}&post_type=product`, parse: html });
+    if (store.adapter === 'generic') {
+      attempts.push({ url: `https://${store.domain}/?q=${encoded}`, parse: html });
+      attempts.push({ url: `https://${store.domain}/products?search=${encoded}`, parse: html });
+      attempts.push({ url: `https://${store.domain}/index.php?route=product/search&search=${encoded}`, parse: html });
+    }
+    if (!store.url.endsWith('/')) attempts.push({ url: `${store.url}${store.url.includes('?') ? '&' : '?'}s=${encoded}&post_type=product`, parse: html });
+    const seen = new Set();
+    for (const attempt of attempts) {
+      if (seen.has(attempt.url)) continue;
+      seen.add(attempt.url);
+      try {
+        const body = await fetchText(attempt.url);
+        const found = attempt.parse(body, store).filter(row => queryMatches(row.title, query));
+        if (found.length) return { offers: found, error: null };
+      } catch (error) { errors.push(error.message || 'request failed'); }
+    }
   }
   const distinct = [...new Set(errors)];
   return { offers: [], error: distinct.length ? distinct.join(', ') : 'No matching public product listing found' };

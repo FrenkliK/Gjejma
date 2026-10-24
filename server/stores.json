@@ -179,7 +179,7 @@
     "domain": "neptun.al",
     "url": "https://www.neptun.al/",
     "enabled": true,
-    "adapter": "generic",
+    "adapter": "neptun",
     "country": "AL",
     "currency": "ALL",
     "categories": [

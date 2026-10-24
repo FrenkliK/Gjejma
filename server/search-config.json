@@ -1,0 +1,35 @@
+{
+  "categories": {
+    "phones": ["iphone", "smartphone", "smartphones", "phone", "phones", "telefon", "telefona", "celular", "celulare", "samsung galaxy", "galaxy s", "galaxy a", "galaxy z", "samsung galaxy s", "s25", "s26", "s27", "redmi", "xiaomi", "pixel", "oneplus"],
+    "gaming": ["ps5", "ps 5", "playstation", "xbox", "nintendo switch", "gaming", "video game", "console", "controller", "kontroller", "lojera"],
+    "computers": ["laptop", "laptops", "notebook", "macbook", "desktop", "computer", "kompjuter", "pc", "monitor", "printer", "printera", "ssd", "gpu", "graphics card", "tastiera", "keyboard"],
+    "tv": ["tv", "televizor", "televizore", "television", "smart tv", "oled", "qled"],
+    "appliances": ["fridge", "friges", "refrigerator", "freezer", "frigorifer", "toster", "toaster", "tostjere", "microwave", "mikrovale", "washing machine", "lavatrice", "dishwasher", "lavastovilje", "vacuum", "fshese", "air fryer", "friteze", "blender", "tumble dryer", "tharese rrobash", "oven", "furre", "kettle", "ibrik", "iron", "hekur", "toaster"],
+    "mobility": ["electric bike", "e bike", "ebike", "biciklet", "bicycle", "bike", "electric scooter", "e scooter", "scooter", "skuter", "monopatin"],
+    "home": ["furniture", "mobilje", "sofa", "divan", "chair", "karrige", "table", "tavoline", "garden", "kopsht", "mattress", "dyshek"]
+  },
+  "stopwords": ["price", "prices", "cost", "costs", "cheap", "best", "buy", "find", "shop", "online", "how", "much", "is", "the", "for", "to", "of", "in", "albania", "albanian", "shqiperi", "sa", "kushton", "cmimi", "blej", "dua", "me", "per", "te"],
+  "storeGroups": {
+    "phones": ["phones", "marketplace"],
+    "gaming": ["gaming", "marketplace"],
+    "computers": ["computers", "marketplace"],
+    "tv": ["tv", "appliances", "home", "marketplace"],
+    "appliances": ["appliances", "home", "marketplace"],
+    "mobility": ["bikes", "scooters", "sports", "marketplace"],
+    "home": ["home", "appliances", "marketplace"]
+  },
+  "aliases": [
+    {"category":"gaming","match":["ps5","ps 5","playstation 5","playstation5","ps five"],"search":["PS5","PlayStation 5"]},
+    {"category":"gaming","match":["ps4","playstation 4","playstation4"],"search":["PS4","PlayStation 4"]},
+    {"category":"gaming","match":["xbox series x","xbox series s","xbox"],"search":["Xbox Series X","Xbox Series S"]},
+    {"category":"phones","match":["s26 ultra","galaxy s26 ultra","samsung galaxy s26 ultra"],"search":["Samsung Galaxy S26 Ultra","Galaxy S26 Ultra","S26 Ultra"]},
+    {"category":"phones","match":["s26","galaxy s26","samsung galaxy s26"],"search":["Samsung Galaxy S26","Galaxy S26","S26"]},
+    {"category":"phones","match":["s25 ultra","galaxy s25 ultra","samsung galaxy s25 ultra"],"search":["Samsung Galaxy S25 Ultra","Galaxy S25 Ultra","S25 Ultra"]},
+    {"category":"phones","match":["s25","galaxy s25","samsung galaxy s25"],"search":["Samsung Galaxy S25","Galaxy S25","S25"]},
+    {"category":"appliances","match":["fridge","friges","refrigerator","freezer"],"search":["frigorifer","frigorifer ngrirës"]},
+    {"category":"appliances","match":["toaster","toster"],"search":["tostjere","thekese buke","toster"]},
+    {"category":"mobility","match":["electric bike","electric bicycle","e-bike","ebike"],"search":["biciklete elektrike","biciklet elektrike","e-bike"]},
+    {"category":"mobility","match":["electric scooter","e-scooter"],"search":["skuter elektrik","monopatine elektrike"]}
+  ]
+}
+

@@ -1,94 +1,130 @@
 # Gjejma 🇦🇱
 
-**Gjej çmimin. Jo xhiron.** Gjejma is an open-source Albanian price comparison project. Search once and see offers collected from Albanian-market shops, then buy directly from the retailer. Gjejma does not sell products or handle checkout.
+**Gjej çmimin. Jo xhiron.** Gjejma është projekt me kod burimor të hapur për krahasimin e çmimeve në kohë reale nga dyqanet në internet në Shqipëri. Kërko një produkt, krahaso ofertat dhe hape listimin te shitësi. Gjejma nuk shet produkte dhe nuk përpunon pagesa.
 
-This repository contains the website and Node.js API, plus a standalone native Android app. Both website and Android searches contact enabled Albanian retailers at the time of each search. Search results are returned for that request and are not written to a local or server catalogue. The Android APK needs no Gjejma server or other computer.
+Depoja e kodit përmban faqen e internetit, aplikacion për kompjuterët Windows dhe aplikacion Android. Kërkimet bëhen në kohë reale dhe rezultatet nuk ruhen në katalog ose llogari.
 
-## Download and use the Android app by itself
+## Shkarkimet
 
-1. Open [Gjejma Releases](https://github.com/FrenkliK/Gjejma/releases/latest).
-2. Under **Assets**, download `Gjejma.apk`. You do not need the source ZIP or repository.
-3. Open the APK on your Android phone and approve Android's one-time prompt to install apps from your browser or file manager.
-4. Open **Gjejma**, enter a product and tap **Kërko tani**. The app sends the search directly from the phone to each enabled shop and shows current responses.
+Shkarko aplikacionet nga [publikimi më i fundit](https://github.com/FrenkliK/Gjejma/releases/latest):
 
-A network connection is required for every search. Product searches and results are not saved by the app. Coverage depends on store availability, the store's search/catalogue format, and network access. A store can return an actual HTTP error (including 403 or 404), which Gjejma reports without trying to bypass access controls. For stores where the project has permission to query, `robots.txt` is not used as an authorization gate. Prices and stock can change, so confirm on the seller's site before buying.
+- **Windows:** [Gjejma-Setup.exe](https://github.com/FrenkliK/Gjejma/releases/latest/download/Gjejma-Setup.exe). Instaloje dhe hape nga menyja Start. Nuk kërkohet Node.js, shkarkimi i depos së kodit apo server veçmas. Aktualisht ofrohet për Windows 64-bit.
+- **Android:** [Gjejma.apk](https://github.com/FrenkliK/Gjejma/releases/latest/download/Gjejma.apk). Hape në telefon dhe ndiq udhëzimet e Android-it për instalim jashtë Play Store.
 
-Every push to `main` builds an APK under **Actions → Android app** (artifact expires after 30 days). Every Android app change on `main` also creates a permanent GitHub Release with the standalone `Gjejma.apk`; no tag or repository download is required. Version tags can also create named releases. Debug APKs are signed for sideloading and testing, not Play Store distribution.
+Të dy aplikacionet kërkojnë internet për kërkimet në kohë reale. Instaluesi Windows nuk është nënshkruar me certifikatë komerciale; Windows mund të kërkojë konfirmim para hapjes. Aplikacione për kompjuterët macOS dhe Linux nuk ofrohen ende.
 
-## Start the website locally
+## Si përdoret
 
-1. Install [Node.js 20 or newer](https://nodejs.org/). No `npm install` is needed.
-2. Download or clone the repository.
-3. Double-click `start.bat` on Windows, or run `sh ./start.sh` on macOS/Linux.
-4. Open `http://localhost:3000`. Each search queries the enabled shop websites live; the server does not start a scheduled catalogue collection by default.
+1. Kërko emrin, markën ose modelin, p.sh. `Samsung`, `S26 Ultra`, `PS5`, `frigorifer` ose `biçikletë elektrike`.
+2. Zgjidh filtër kategorie për rezultate më të sakta. Kërko `Samsung` dhe zgjidh **Telefona** për të hequr televizorët dhe elektroshtëpiaket Samsung.
+3. Për `PS5`, zgjidh **Konzola** për të lënë jashtë lojërat dhe aksesorët që identifikohen në titullin e produktit.
+4. Zgjidh **Të gjitha** për kërkim pa filtër kategorie.
+5. Krahaso çmimin, dyqanin dhe stokun e raportuar. Hape ofertën te shitësi për të konfirmuar detajet para blerjes.
 
-Search results appear as soon as the selected shops respond. The directory includes 40+ Albanian online retailers and marketplaces spanning phones, computers, TVs, large and small appliances, home and garden, gaming, scooters and bicycles, and general goods. Gjejma identifies clear product categories and checks their relevant shop groups; ambiguous searches still check the full directory. Each shop request has a timeout, and the UI shows the checked-shop count and errors for shops it could not search. Store search pages vary, so a retailer may need a dedicated adapter if its site does not expose a compatible public search endpoint or product markup. No list can guarantee literally every Albanian online shop; contributors can add stores in `server/stores.json`.
+Filtrat janë të njëjtë në faqen e internetit dhe Android. Kategoritë përfshijnë Telefona, Konzola, Lojëra & aksesorë, TV & audio, pajisje të mëdha e të vogla shtëpiake, Ftohje & ngrohje, Kujdes personal, Kompjutera, Biçikleta & skuterë dhe Shtëpi & kopsht. Ndarja ndjek departamente të njohura të dyqaneve shqiptare, si Telefonia, TV & Audio, Ftohje & Ngrohje dhe Kompjutera.
 
-Search terms are normalized and matched with common abbreviations, aliases, and one-character typo tolerance. A shared `server/search-config.json` maps terms such as `PS5` to PlayStation 5 and routes clear product categories to matching retailer groups, reducing unnecessary live requests. Ambiguous queries still search the full enabled directory. The Android app bundles the same configuration and store list.
+Filtrimi përdor fjalë nga titulli i produktit. Titujt e paplotë mund të kategorizohen gabim; provo emrin e plotë ose **Të gjitha** nëse mungojnë rezultate.
 
-## Features
+## Nise faqen e internetit nga kodi burimor
 
-- Search shop listings and sort by price or retailer.
-- Open the original listing on the seller site.
-- See reported availability and the time each retailer responded.
-- Search across 40+ configured Albanian retailers and marketplaces, including general stores and appliance, computer, gaming, and mobility shops.
-- Website users can save searches and price targets locally in their browser.
-- Android users search stores directly from their phone; no server, computer, or account is needed.
-- The backend exposes health, shop status, products, offers, and price-history APIs.
+Në Windows, instalo [Node.js 20 ose më të ri](https://nodejs.org/), shkarko depon e kodit dhe hape `start.bat`. Pastaj vizito [http://localhost:3000](http://localhost:3000). Nuk nevojitet `npm install`; shtyp `Ctrl+C` në dritaren e terminalit për ta ndalur serverin.
 
-## Build the Android app
+Në macOS ose Linux instalo Node.js 20 ose më të ri, shkarko depon e kodit dhe ekzekuto nga dosja e projektit:
 
-Open `android/` in Android Studio with JDK 17 and Android SDK Platform 36 installed. This project uses Gradle 9.3.1 and omits generated Gradle wrapper binaries. With Gradle 9.3.1 installed, build with:
+```sh
+sh ./start.sh
+```
+
+Pastaj vizito [http://localhost:3000](http://localhost:3000).
+
+## Kërkimi dhe mbulimi
+
+Gjejma kontrollon dyqanet e aktivizuara drejtpërdrejt gjatë kërkimit. Lista përfshin mbi 40 dyqane dhe platforma tregtare shqiptare me telefona, kompjutera, TV, pajisje shtëpiake, mobilie, lojëra, biçikleta dhe skuterë. Kategoritë e qarta ngushtojnë dyqanet që kontrollohen; **Të gjitha** kërkon në gjithë listën.
+
+Mbulimi varet nga dyqani, interneti dhe formati i katalogut ose faqes së kërkimit. Disa faqe mund të kthejnë gabim HTTP, të mos kenë kërkim publik të lexueshëm ose të japin tituj të paplotë. Gjejma nuk anashkalon hyrjet, CAPTCHA-t apo mbrojtjet kundër bot-ëve. Disponueshmëria merret nga listimi dhe mund të jetë e vjetruar; konfirmoje te shitësi.
+
+## Privatësia
+
+- Nuk kërkohet llogari.
+- Kërkimet në kohë reale nuk ruhen në telefon, serverin lokal apo bazë qendrore.
+- Faqja e internetit ruan të preferuarat dhe objektivat e çmimit vetëm në `localStorage` të shfletuesit.
+- Aplikacionet kontaktojnë faqet publike të dyqaneve për rezultatet; nevojitet internet.
+
+## Funksionet
+
+- Kërkim në kohë reale në dyqanet shqiptare të konfiguruara.
+- Filtra opsionalë kategorish në faqen e internetit dhe Android.
+- Shkurtesa dhe emra alternativë, p.sh. `PS5` / `PlayStation 5`.
+- Terma shqip e anglisht dhe tolerancë për një gabim të vogël shkrimi.
+- Renditje sipas çmimit ose dyqanit; shfaqje e ofertës dhe stokut të raportuar.
+- Të preferuara dhe objektiva çmimi të ruajtura në shfletues.
+- Android pa server të Gjejma-s; Windows pa instalim të Node.js.
+- Ndërfaqe dhe dokumentim në shqip.
+
+## Zhvillimi i faqes së internetit
+
+Kërkohet Node.js 20 ose më i ri. Faqja e internetit nuk ka nevojë për paketa npm shtesë:
+
+```sh
+node server/server.js
+```
+
+Hape [http://localhost:3000](http://localhost:3000). Për portë tjetër cakto variablën `PORT`. Kërkimet në kohë reale nuk lexojnë ose përditësojnë `server/db.json`.
+
+Përshtatësit provojnë API-në e WooCommerce Store, sugjerimet e Shopify, faqet e kërkimit të dyqaneve, të dhënat JSON-LD dhe kartat e produkteve. Mbledhësi i vjetër i katalogut është opsional; `AUTO_COLLECT=true` e aktivizon.
+
+### Aplikacioni Windows
+
+Përdoruesi i instaluesit nuk ka nevojë për Node.js. Për zhvillim/paketim duhen Windows, Node.js 22 dhe Electron Forge:
+
+```powershell
+cd desktop
+npm install
+npm start
+npm run make
+```
+
+Instaluesi prodhohet te `desktop/out/make/`. GitHub Actions e publikon bashkë me APK-në kur ndryshon kodi i faqes së internetit, serverit, Android-it ose aplikacionit Windows. Mjedisi i ekzekutimit dhe Chromium përfshihen në paketë; kërkimet kërkojnë internet.
+
+### Aplikacioni Android
+
+Hape `android/` në Android Studio me JDK 17 dhe Android SDK Platform 36. Projekti përdor Gradle 9.3.1 dhe nuk përfshin skedarët binarë të Gradle Wrapper. Me Gradle 9.3.1 të instaluar:
 
 ```sh
 gradle -p android assembleDebug
 ```
 
-The output is `android/app/build/outputs/apk/debug/app-debug.apk`. Google Play publication requires a separately managed release signing key and Play Console setup. Never commit signing keys or passwords.
+APK-ja krijohet te `android/app/build/outputs/apk/debug/app-debug.apk`. Kjo APK është për instalim/provë jashtë Play Store. Publikimi në Play Store kërkon çelës nënshkrimi dhe konfigurim të veçantë. Mos i ruaj çelësat ose fjalëkalimet në depon e kodit.
 
-## Run the website backend
+## Struktura e depos së kodit
 
-On Windows, double-click `start.bat`; on macOS/Linux, run `sh ./start.sh`. Or run `node server/server.js`. Use `Ctrl+C` to stop it. `collect.bat` or `npm run collect` starts a manual refresh.
+Kodi ndahet në `web/` (faqja e internetit), `server/` (API-ja, kërkimi, dyqanet dhe konfigurimi), `desktop/` (aplikacioni Windows), `android/` (aplikacioni Android), `docs/` (arkitektura) dhe `.github/workflows/` (ndërtimet automatike). `start.bat` dhe `start.sh` nisin faqen e internetit nga kodi burimor; `collect.bat` nis mbledhësin opsional të vjetër.
 
-The live search adapter tries WooCommerce Store API search, Shopify product suggestions, retailer search pages, JSON-LD product data, and common product-card markup. It does not use `robots.txt` as a blocker for retailers the project is authorized to query. It reports real access errors and does not bypass logins, CAPTCHAs, or anti-bot protections. The old full-catalogue collector is only an optional legacy utility; it is not run by normal website searches. Set `AUTO_COLLECT=true` to opt into that legacy utility.
+## API-ja lokale
 
-### Optional category filters
+API-ja lokale ofrohet nga serveri Node.js:
 
-Search a product or brand, then choose **Të gjitha** or a category chip to narrow the results. Categories follow familiar Albanian retailer departments such as Telefonia, TV & Audio, Ftohje & Ngrohje, Kompjutera, and appliance departments. For example, search `Samsung` and select **Telefona** to remove Samsung TVs and appliances; search `PS5` and select **Konzola** to leave out games and accessories. With **Të gjitha**, Gjejma keeps the broad live search. Category matching uses product-title clues, so a store with vague titles may still need a dedicated adapter or improved category rules.
+- `GET /api/health` — gjendja e serverit dhe katalogut të vjetër.
+- `GET /api/shops` — lista dhe statusi i dyqaneve.
+- `GET /api/categories` — emrat dhe rregullat e filtrave.
+- `GET /api/search?q=iphone` — kërkim pa filtër kategorie.
+- `GET /api/search?q=samsung&category=phones` — kërkim me filtër telefoni.
+- `GET /api/products?limit=100&offset=0&q=iphone` — faqe nga katalogu opsional i vjetër.
+- `GET /api/products/:id` — produkti, ofertat dhe historiku i katalogut të vjetër.
+- `GET /api/history/:id` — historiku i çmimeve të katalogut të vjetër.
 
-## Repository layout
+Parametri `category` pranon çelësat e kthyer nga `/api/categories`. Kërkimet në kohë reale nuk ruhen në katalog. `POST /api/collect` përdoret vetëm nga mbledhësi i vjetër lokal.
 
-```text
-web/                         responsive Albanian website
-server/server.js             static server and JSON API
-server/collector.js          live retailer search adapters; legacy collector entry point
-server/stores.json            retailer directory and adapter settings
-server/db.json.example        empty database template
-android/                      standalone Android app and Android Studio project
-docs/ARCHITECTURE.md          components, data model, and API details
-.github/workflows/android.yml builds a downloadable APK artifact
-.github/workflows/android-release.yml attaches APK to version Releases
-start.bat / start.sh          local website launch shortcuts
-collect.bat                   manual backend catalogue refresh
-```
+## Kontributet
 
-## API
+1. Shto dyqane te `server/stores.json`, me identifikues unik, domen të saktë, përshtatës dhe etiketa kategorish.
+2. Shto emra alternativë ose rregulla filtrimi te `server/search-config.json`; filtrat shfaqen automatikisht në faqen e internetit dhe Android.
+3. Për dyqane me strukturë të veçantë, përmirëso përshtatësin te `server/collector.js`.
+4. Përditëso udhëzimet kur ndryshon sjellja.
 
-- `GET /api/health`
-- `GET /api/shops`
-- `GET /api/categories`
-- `GET /api/search?q=iphone`
-- `GET /api/search?q=samsung&category=phones`
-- `GET /api/products/:id`
-- `GET /api/history/:id`
-- `POST /api/collect` (local server only)
+Mos anashkalo hyrjet, CAPTCHA-t ose kontrollet kundër bot-ëve. Për dyqanet që nuk lejojnë kërkim automatik, kërko bashkëpunim të autorizuar.
 
-Set `PORT` to change the web server port. The optional `category` parameter accepts a key from `/api/categories` and filters both retailer selection and product titles. Live searches do not use or update `server/db.json`. The legacy collection is disabled by default; `AUTO_COLLECT=true` opts into it.
+## Licenca
 
-## License
-
-MIT. See [LICENSE](LICENSE).
-
-
-
+Gjejma shpërndahet sipas licencës MIT. Shiko [LICENSE](LICENSE).
 

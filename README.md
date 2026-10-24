@@ -71,7 +71,7 @@ node server/server.js
 
 Hape [http://localhost:3000](http://localhost:3000). Për portë tjetër cakto variablën `PORT`. Kërkimet në kohë reale nuk lexojnë ose përditësojnë `server/db.json`.
 
-Përshtatësit provojnë API-në e WooCommerce Store, sugjerimet e Shopify, faqet e kërkimit të dyqaneve, të dhënat JSON-LD dhe kartat e produkteve. Mbledhësi i vjetër i katalogut është opsional; `AUTO_COLLECT=true` e aktivizon.
+Përshtatësit provojnë API-në e WooCommerce Store, sugjerimet e Shopify, kërkimin e katalogut CS-Cart, faqet e kërkimit të dyqaneve, të dhënat JSON-LD dhe kartat e produkteve. Mbledhësi i vjetër i katalogut është opsional; `AUTO_COLLECT=true` e aktivizon.
 
 ### Aplikacioni Windows
 

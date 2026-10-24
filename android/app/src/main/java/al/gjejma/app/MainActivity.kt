@@ -67,6 +67,24 @@ private suspend fun fetchText(address: String): String = withContext(Dispatchers
     try { if (c.responseCode !in 200..299) error("HTTP ${c.responseCode}"); c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
 }
 
+private suspend fun fetchNeptunSearch(store: Store, term: String): String = withContext(Dispatchers.IO) {
+    val origin = URL(store.url).let { "${it.protocol}://${it.host}" }
+    val c = URL(URL(store.url), "/Product/SearchProductsAutocomplete").openConnection() as HttpURLConnection
+    c.connectTimeout = 10_000; c.readTimeout = 16_000; c.instanceFollowRedirects = true
+    c.requestMethod = "POST"; c.doOutput = true
+    c.setRequestProperty("User-Agent", "GjejmaAndroid/1.0 (+https://github.com/FrenkliK/Gjejma; public product catalog)")
+    c.setRequestProperty("Accept", "application/json, text/plain, */*")
+    c.setRequestProperty("Content-Type", "application/json;charset=UTF-8")
+    c.setRequestProperty("Origin", origin); c.setRequestProperty("Referer", "$origin/")
+    c.setRequestProperty("FROM-ANGULAR", "true"); c.setRequestProperty("X-Requested-With", "XMLHttpRequest")
+    val body = JSONObject().put("term", term).put("page", 1).put("itemsPerPage", 200).toString().toByteArray(Charsets.UTF_8)
+    try {
+        c.outputStream.use { it.write(body) }
+        if (c.responseCode !in 200..299) error("HTTP ${c.responseCode}")
+        c.inputStream.bufferedReader().use { it.readText() }
+    } finally { c.disconnect() }
+}
+
 private suspend fun storeDirectory(context: android.content.Context): List<Store> = withContext(Dispatchers.IO) {
     val raw = context.assets.open("stores.json").bufferedReader().use { it.readText() }
     val a = JSONArray(raw)
@@ -291,8 +309,37 @@ private fun parseSearchResponse(store: Store, raw: String, query: String, config
     return found.distinctBy { it.second.url }
 }
 
+private fun parseNeptunResponse(store: Store, raw: String, query: String, config: JSONObject, filterCategory: String?): List<Pair<String, Offer>> {
+    val root = runCatching { JSONObject(raw) }.getOrNull() ?: return emptyList()
+    val products = root.optJSONArray("list") ?: root.optJSONObject("ProductsResult")?.optJSONArray("results") ?: JSONArray()
+    val found = mutableListOf<Pair<String, Offer>>()
+    for (i in 0 until products.length()) {
+        val product = products.optJSONObject(i) ?: continue
+        if (product.has("Type") && product.optInt("Type") != 1) continue
+        val title = product.optString("Title", product.optString("ShortTitle"))
+        if (title.isBlank() || !queryMatches(title, query, config, filterCategory)) continue
+        val price = listOf("WebshopDiscountPrice", "ActualPrice", "DiscountPrice", "RegularPrice")
+            .firstNotNullOfOrNull { parsePrice(product.opt(it)) } ?: continue
+        val stock = if (!product.has("AvailableWebshop")) "" else if (product.optBoolean("AvailableWebshop")) "in stock" else "out of stock"
+        val identity = product.optString("CodeNumber", product.optString("ProductCode", product.optString("Barcode", product.optString("Id"))))
+        val parsed = safeProduct(store, title, product.optString("Link", product.optString("Url")), price, store.currency, stock, identity) ?: continue
+        val offer = parsed.getJSONObject("offer")
+        found += title to Offer(store.name, store.domain, offer.getDouble("price"), offer.getString("currency"), offer.getString("availability"), offer.getString("url"), offer.getLong("checkedAt"))
+    }
+    return found.distinctBy { it.second.url }
+}
+
 private suspend fun searchStore(store: Store, query: String, config: JSONObject, filterCategory: String?): Pair<List<Pair<String, Offer>>, String?> {
     val errors = mutableListOf<String>()
+    if (store.adapter == "neptun") {
+        for (searchTerm in searchAlternatives(query, config)) {
+            try {
+                val offers = parseNeptunResponse(store, fetchNeptunSearch(store, searchTerm), query, config, filterCategory)
+                if (offers.isNotEmpty()) return offers to null
+            } catch (e: Exception) { errors += (e.message ?: "Kërkimi dështoi") }
+        }
+        return emptyList<Pair<String, Offer>>() to (errors.distinct().joinToString(", ").ifBlank { "Nuk u gjet listim publik që përputhet" })
+    }
     val routes = when (store.adapter) {
         "shopify" -> listOf("", "search", "store")
         "woocommerce" -> listOf("woo", "", "search", "store")

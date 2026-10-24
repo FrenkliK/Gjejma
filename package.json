@@ -7,7 +7,8 @@
     "start": "node server/server.js",
     "collect": "node server/collector.js",
     "collect:once": "node server/collector.js",
-    "check": "node --check server/server.js && node --check server/collector.js && node --check web/app.js"
+    "check": "node --check server/server.js && node --check server/collector.js && node --check web/app.js && node --check desktop/main.js && node --check desktop/forge.config.js"
   },
   "engines": { "node": ">=20" }
 }
+

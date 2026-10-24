@@ -86,6 +86,8 @@ npm run make
 
 Instaluesi prodhohet te `desktop/out/make/`. GitHub Actions e publikon bashkë me APK-në kur ndryshon kodi i faqes së internetit, serverit, Android-it ose aplikacionit Windows. Mjedisi i ekzekutimit dhe Chromium përfshihen në paketë; kërkimet kërkojnë internet.
 
+Nëse aplikacioni i vjetër Windows hapet për pak çaste dhe mbyllet, shkarko instaluesin nga publikimi më i fundit dhe instaloje përsëri. Versioni i rregulluar trajton siç duhet nisjen e parë nga instaluesi. Nëse shfaqet dritarja e gabimit, ajo tregon edhe vendndodhjen e regjistrit `gjejma.log` për diagnostikim.
+
 ### Aplikacioni Android
 
 Hape `android/` në Android Studio me JDK 17 dhe Android SDK Platform 36. Projekti përdor Gradle 9.3.1 dhe nuk përfshin skedarët binarë të Gradle Wrapper. Me Gradle 9.3.1 të instaluar:

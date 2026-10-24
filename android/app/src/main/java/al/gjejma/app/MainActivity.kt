@@ -129,7 +129,21 @@ private fun safeProduct(store: Store, title: String, link: String, price: Double
 
 private fun normalize(s: String) = java.text.Normalizer.normalize(s.lowercase(Locale.ROOT), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "").replace(Regex("\\bbiciklet\\b"), "biciklete").replace(Regex("[^a-z0-9]+"), " ").trim()
 
-private fun hasPhrase(text: String, phrase: String) = " ${normalize(text)} ".contains(" ${normalize(phrase)} ")
+private fun hasPhrase(text: String, phrase: String): Boolean {
+    val words = normalize(text).split(" ").filter(String::isNotBlank)
+    val phraseWords = normalize(phrase).split(" ").filter(String::isNotBlank)
+    if (phraseWords.isEmpty()) return false
+    if (" ${words.joinToString(" ")} ".contains(" ${phraseWords.joinToString(" ")} ")) return true
+    if (words.size < phraseWords.size) return false
+    for (start in 0..words.size - phraseWords.size) {
+        val prefixMatches = phraseWords.dropLast(1).indices.all { offset -> words[start + offset] == phraseWords[offset] }
+        val last = words[start + phraseWords.size - 1]
+        val prefix = phraseWords.last()
+        val suffix = last.removePrefix(prefix)
+        if (prefixMatches && last.startsWith(prefix) && suffix.firstOrNull()?.isDigit() == true) return true
+    }
+    return false
+}
 
 private fun isOneTypoAway(a: String, b: String): Boolean {
     if (a.length < 5 || b.length < 5 || kotlin.math.abs(a.length - b.length) > 1) return false
@@ -247,6 +261,7 @@ private fun queryUrl(store: Store, query: String, route: String = ""): String {
     val encoded = java.net.URLEncoder.encode(query, "UTF-8")
     return when {
         store.adapter == "shopify" && route.isEmpty() -> "https://${store.domain}/search/suggest.json?q=$encoded&resources[type]=product&resources[limit]=20"
+        route == "cscart" -> "https://${store.domain}/?dispatch=products.search&match=all&subcats=Y&pcode_from_q=Y&pshort=Y&pfull=Y&pname=Y&pkeywords=Y&search_performed=Y&q=$encoded"
         route == "woo" -> "https://${store.domain}/wp-json/wc/store/v1/products?search=$encoded&per_page=100"
         route == "wpsearch" -> "https://${store.domain}/?s=$encoded"
         route == "search" -> if (store.adapter == "shopware") "https://${store.domain}/search?search=$encoded" else "https://${store.domain}/search?q=$encoded"
@@ -266,6 +281,24 @@ private fun parseSearchResponse(store: Store, raw: String, query: String, config
         val offer = safeProduct(store, title, link, price, currency, stock, identity) ?: return
         val o = offer.getJSONObject("offer")
         found += title to Offer(store.name, store.domain, o.getDouble("price"), o.getString("currency"), o.getString("availability"), o.getString("url"), o.getLong("checkedAt"))
+    }
+    if (store.adapter == "cscart") {
+        val forms = Regex("<form\\b[^>]*name=[\"']product_form_(\\d+)[\"'][^>]*>[\\s\\S]*?</form>", RegexOption.IGNORE_CASE)
+        for (match in forms.findAll(raw)) {
+            val block = match.value
+            val titleLink = Regex("<a\\b[^>]*class=[\"'][^\"']*\\bproduct-title\\b[^\"']*[\"'][^>]*>", RegexOption.IGNORE_CASE).find(block)?.value.orEmpty()
+            val title = Regex("\\btitle=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE).find(titleLink)?.groupValues?.get(1)
+                ?: Regex("<img\\b[^>]*\\balt=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE).find(block)?.groupValues?.get(1).orEmpty()
+            val link = Regex("\\bhref=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE).find(titleLink)?.groupValues?.get(1).orEmpty()
+            val amount = Regex("<span\\b[^>]*class=[\"'][^\"']*\\bty-price-num\\b[^\"']*[\"'][^>]*>([\\d., ]+)</span>", RegexOption.IGNORE_CASE).find(block)?.groupValues?.get(1)
+            add(title.replace("&amp;", "&").replace("&quot;", "\""), link, parsePrice(amount), store.currency,
+                when {
+                    Regex("out of stock|sold out|nuk ka(?:\\s+ne)?\\s+stok", RegexOption.IGNORE_CASE).containsMatchIn(block) -> "out of stock"
+                    Regex("in stock|ne stok|available|vetëm\\s+\\d+\\s+produkte?\\s+të\\s+mbetura", RegexOption.IGNORE_CASE).containsMatchIn(block) -> "in stock"
+                    else -> ""
+                }, match.groupValues[1])
+        }
+        return found.distinctBy { it.second.url }
     }
     if (store.adapter == "shopify" && raw.trimStart().startsWith('{')) {
         val root = runCatching { JSONObject(raw) }.getOrNull()
@@ -347,6 +380,7 @@ private suspend fun searchStore(store: Store, query: String, config: JSONObject,
         return emptyList<Pair<String, Offer>>() to error
     }
     val routes = when (store.adapter) {
+        "cscart" -> listOf("cscart")
         "shopify" -> listOf("", "search", "store")
         "woocommerce" -> listOf("woo", "wpsearch", "", "search", "store")
         "shopware" -> listOf("search", "query", "store")

@@ -1,0 +1,9 @@
+node_modules/
+server/db.json
+server/db.json.tmp
+server/collector.lock
+android/.gradle/
+android/local.properties
+android/**/build/
+.env
+*.log

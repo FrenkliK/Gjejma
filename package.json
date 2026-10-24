@@ -1,0 +1,13 @@
+{
+  "name": "gjejma",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Open-source Albanian price comparison website and Android app",
+  "scripts": {
+    "start": "node server/server.js",
+    "collect": "node server/collector.js",
+    "collect:once": "node server/collector.js",
+    "check": "node --check server/server.js && node --check server/collector.js && node --check web/app.js"
+  },
+  "engines": { "node": ">=20" }
+}

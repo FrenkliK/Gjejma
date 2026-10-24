@@ -13,7 +13,7 @@ This repository contains the website and Node.js API/collector, plus a standalon
 
 A network connection is needed to download the store directory and refresh prices. Initial data is empty; the app never fills the screen with invented sample offers. Coverage depends on stores that expose reachable public feeds, their `robots.txt` rules and access policies, and network availability. Prices and stock can change, so confirm on the seller's site before buying.
 
-Every push to `main` builds an APK under **Actions → Android app** (artifact expires after 30 days). A version tag triggers **Android release APK**, which attaches a standalone APK to a permanent GitHub Release. Debug APKs are signed for sideloading and testing, not Play Store distribution.
+Every push to `main` builds an APK under **Actions → Android app** (artifact expires after 30 days). Every Android app change on `main` also creates a permanent GitHub Release with the standalone `Gjejma.apk`; no tag or repository download is required. Version tags can also create named releases. Debug APKs are signed for sideloading and testing, not Play Store distribution.
 
 ## Start the website locally
 
@@ -80,6 +80,7 @@ Set `PORT` to change the web server port and `AUTO_COLLECT=false` to disable sch
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
 
 
 

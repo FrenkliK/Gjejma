@@ -18,6 +18,19 @@
     "mobility": ["bikes", "scooters", "sports", "marketplace"],
     "home": ["home", "appliances", "marketplace"]
   },
+  "userCategories": {
+    "phones": {"label":"Telefona","storeGroup":"phones","include":["iphone","smartphone","mobile phone","telefon","galaxy s","galaxy a","galaxy z","galaxy note","galaxy fold","galaxy flip","pixel","redmi","xiaomi","oneplus","samsung galaxy s","samsung galaxy a","samsung galaxy z","samsung galaxy note","samsung galaxy fold","samsung galaxy flip"],"exclude":["case","cover","kase","mbrojtese","charger","karikues","cable","kabllo","screen protector","xham mbrojtes"]},
+    "consoles": {"label":"Konzola","storeGroup":"gaming","include":["ps5","ps 5","playstation 5","playstation5","ps4","playstation 4","xbox series","xbox one","nintendo switch","console","konsole"],"exclude":["game","loje","fifa","fc 25","fc 26","nba 2k","controller","kontroller","joystick","headset","case","cover","charger","accessory","aksesore"]},
+    "games": {"label":"Lojëra & aksesorë","storeGroup":"gaming","include":["game","loje","fifa","fc 2","nba 2k","controller","kontroller","joystick","headset","gaming","hogwarts legacy","gta","elden ring","call of duty"]},
+    "computers": {"label":"Kompjutera","storeGroup":"computers","include":["laptop","notebook","macbook","desktop pc","kompjuter","computer","monitor","printer","ssd","graphics card","gpu"],"exclude":["case","cover","charger","cable","mouse pad"]},
+    "tv": {"label":"TV & Audio","storeGroup":"tv","include":["tv","televizor","television","oled","qled","soundbar","speaker","altoparlant","headphones","kufje"]},
+    "largeAppliances": {"label":"Elektroshtëpiake të mëdha","storeGroup":"appliances","include":["fridge","refrigerator","freezer","frigorifer","washing machine","lavatrice","dishwasher","lavastovilje","tumble dryer","tharese rrobash","oven","furre"]},
+    "smallAppliances": {"label":"Elektroshtëpiake të vogla","storeGroup":"appliances","include":["toaster","toster","tostjere","microwave","mikrovale","vacuum","fshese","air fryer","friteze","blender","mixer","kettle","ibrik","iron","hekur","coffee machine","makine kafeje"]},
+    "climate": {"label":"Ftohje & Ngrohje","storeGroup":"appliances","include":["air conditioner","kondicioner","heater","ngrohes","fan","ventilator","air cooler","ftohes ajri","dehumidifier"]},
+    "personalCare": {"label":"Kujdesi personal","storeGroup":"appliances","include":["hair dryer","tharese flokesh","hair straightener","rregullues flokesh","shaver","rruarese","toothbrush","furce dhembesh","epilator","trimmer"]},
+    "mobility": {"label":"Biçikleta & skuterë","storeGroup":"mobility","include":["electric bike","e bike","ebike","biciklet","bicycle","bike","electric scooter","e scooter","scooter","skuter","monopatin"]},
+    "home": {"label":"Shtëpi & kopsht","storeGroup":"home","include":["furniture","mobilje","sofa","divan","chair","karrige","table","tavoline","garden","kopsht","mattress","dyshek"]}
+  },
   "aliases": [
     {"category":"gaming","match":["ps5","ps 5","playstation 5","playstation5","ps five"],"search":["PS5","PlayStation 5"]},
     {"category":"gaming","match":["ps4","playstation 4","playstation4"],"search":["PS4","PlayStation 4"]},

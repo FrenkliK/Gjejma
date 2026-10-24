@@ -1,18 +1,195 @@
-const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const ROOT=__dirname,stores=require('./stores.json'),DB=path.join(ROOT,'db.json'),LOCK=path.join(ROOT,'collector.lock'),TIMEOUT=20000,MAX_PRODUCTS=1500;
-function read(){try{return JSON.parse(fs.readFileSync(DB,'utf8'))}catch{return{products:[],offers:[],history:[],runs:[]}}}
-function save(d){const tmp=DB+'.tmp';fs.writeFileSync(tmp,JSON.stringify(d,null,2));fs.renameSync(tmp,DB)}
-function acquireLock(){try{return fs.openSync(LOCK,'wx')}catch(e){if(e.code!=='EEXIST')throw e;try{const data=JSON.parse(fs.readFileSync(LOCK,'utf8'));process.kill(data.pid,0);return null}catch(err){if(err.code==='ESRCH'||err.code==='ENOENT'||err instanceof SyntaxError){try{if(fs.existsSync(LOCK)&&Date.now()-fs.statSync(LOCK).mtimeMs<60_000)return null;fs.unlinkSync(LOCK);return fs.openSync(LOCK,'wx')}catch{return null}}return null}}}
-function id(s){return crypto.createHash('sha1').update(s).digest('hex').slice(0,16)}
-function decode(s=''){return s.replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(+n)).replace(/&#x([\da-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16))).replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim()}
-function price(p){if(p==null)return null;let n=Number(String(p).replace(/[^\d.,]/g,'').replace(/,(?=\d{3}(\D|$))/g,'').replace(/\.(?=\d{3}(\D|$))/g,''));return Number.isFinite(n)&&n>0?n:null}
-async function fetchText(u){let ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),TIMEOUT);try{const r=await fetch(u,{signal:ctrl.signal,headers:{'user-agent':'GjejmaPriceBot/0.1 (+https://github.com/; public product catalog index; contact: open an issue)','accept':'application/json,text/xml,text/html;q=0.9,*/*;q=0.8'}});if(!r.ok)throw Error(`HTTP ${r.status}`);return await r.text()}finally{clearTimeout(t)}}
-async function permitted(store){const host=store.domain,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),TIMEOUT);try{const response=await fetch(`https://${host}/robots.txt`,{signal:controller.signal,headers:{'user-agent':'GjejmaPriceBot/0.1'}});if(response.status===404)return{ok:true,reason:'robots.txt not found'};if(!response.ok)throw Error(`HTTP ${response.status}`);const raw=await response.text(),lines=raw.split(/\r?\n/);let groups=[],group=null;for(const line of lines){const clean=line.split('#')[0].trim(),i=clean.indexOf(':');if(i<0)continue;const key=clean.slice(0,i).trim().toLowerCase(),value=clean.slice(i+1).trim();if(key==='user-agent'){if(!group||group.hasRules){group={agents:[],rules:[],hasRules:false};groups.push(group)}group.agents.push(value.toLowerCase())}else if(group&&(key==='disallow'||key==='allow')){group.hasRules=true;if(value)group.rules.push({key,path:value})}}const matching=groups.filter(g=>g.agents.some(a=>a.includes('gjejma')));const applicable=(matching.length?matching:groups.filter(g=>g.agents.includes('*'))).flatMap(g=>g.rules);const urls=[store.url,...(store.adapter==='woocommerce'?[`https://${host}/wp-json/wc/store/v1/products`]:[])];for(const candidate of urls){const pathname=new URL(candidate).pathname;const matched=applicable.filter(r=>pathname.startsWith(r.path.replace(/\*.*$/,''))).sort((a,b)=>b.path.length-a.path.length);if(matched[0]?.key==='disallow')return{ok:false,reason:`robots.txt disallows ${pathname}`}}return{ok:true,reason:'allowed'} }catch(e){return{ok:false,reason:`robots.txt unavailable: ${e.message}`}}finally{clearTimeout(timer)}}
-function currencyCode(price,store,product){const c=(product.currency||'').toUpperCase();if(c==='ALL'||c==='EUR')return c;return store.currency||'ALL'}
-function productRows(raw,store){let list=Array.isArray(raw)?raw:raw?.products||raw?.items||[];return list.slice(0,MAX_PRODUCTS).map(p=>{let title=String(p.name||p.title||'').trim(),url=p.permalink||p.url||p.link;if(!title||!url)return null;let rawAmount=p.prices?.price??p.price??p.sale_price??p.regular_price??p.offers?.price,amount=price(rawAmount);if(!amount)return null;let minor=Number(p.prices?.currency_minor_unit);if(Number.isFinite(minor)&&minor>0&&p.prices?.price!=null)amount/=10**minor;let link;try{link=new URL(url,`https://${store.domain}`).href}catch{return null}if(new URL(link).hostname!==store.domain&&!new URL(link).hostname.endsWith('.'+store.domain))return null;let availability=String(p.stock_status||p.availability||p.stock||p.is_in_stock||'').toLowerCase();availability=/out|unavailable|sold|false/.test(availability)?'out_of_stock':/instock|in stock|available|true/.test(availability)?'in_stock':'unknown';return{title,url:link,price:amount,currency:p.prices?.currency_code||p.currency||p.priceCurrency||currencyCode(rawAmount,store,p),availability,sku:String(p.sku||p.id||'')}}).filter(Boolean)}
-async function woo(store){const base=`https://${store.domain}/wp-json/wc/store/v1/products?per_page=100&page=`;let all=[];for(let page=1;page<=15;page++){let raw=await fetchText(base+page);let items=JSON.parse(raw);all.push(...productRows(items,store));if(items.length<100)break;await new Promise(r=>setTimeout(r,350))}return all}
-function jsonLd(html,store){let all=[];for(const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){try{const root=JSON.parse(m[1]),nodes=Array.isArray(root)?root:root['@graph']||[root];for(const n of nodes){if(n['@type']!=='Product')continue;const offer=Array.isArray(n.offers)?n.offers[0]:n.offers;if(!offer)continue;all.push(...productRows([{name:n.name,url:n.url||offer.url,price:offer.price||offer.lowPrice,currency:offer.priceCurrency,availability:offer.availability}],store))}}catch{}}return all}
-async function scrape(store){const rule=await permitted(store);if(!rule.ok)throw Error(rule.reason);if(store.adapter==='woocommerce'){try{return await woo(store)}catch(e){if(!/HTTP 404|HTTP 401|HTTP 403|HTTP 406/i.test(e.message))throw e}}const html=await fetchText(store.url);return jsonLd(html,store)}
-function upsert(data,store,items,now){for(const item of items){const stable=item.sku?`${store.id}:${item.sku}`:`${store.id}:${item.url}`;const productId=id(stable),existing=data.products.find(p=>p.id===productId);const product={id:productId,title:item.title,model:item.title,updatedAt:now};if(existing)Object.assign(existing,product);else data.products.push(product);const offer={id:id(`${productId}:${store.id}`),productId,storeId:store.id,store:store.name,domain:store.domain,mark:store.name.split(/\s+/).map(x=>x[0]).join('').slice(0,3).toUpperCase(),price:item.price,currency:item.currency,availability:item.availability,url:item.url,checkedAt:now};const prior=data.offers.find(o=>o.id===offer.id);if(prior&&(prior.price!==offer.price||prior.availability!==offer.availability))data.history.push({productId,storeId:store.id,price:prior.price,currency:prior.currency,availability:prior.availability,checkedAt:prior.checkedAt});if(prior)Object.assign(prior,offer);else data.offers.push(offer)}}
-async function run(){const fd=acquireLock();if(fd===null){console.log('Another collection is already running; skipping this request.');return}fs.writeFileSync(LOCK,JSON.stringify({pid:process.pid,startedAt:new Date().toISOString()}));try{const state=read(),target=process.argv[2],selected=stores.filter(s=>s.enabled&&(!target||s.id===target));if(!selected.length){console.log('No enabled store matched.');return}for(const store of selected){const startedAt=new Date().toISOString();try{const items=await scrape(store);upsert(state,store,items,startedAt);state.runs.push({storeId:store.id,status:'ok',count:items.length,startedAt,finishedAt:new Date().toISOString()});console.log(`${store.name}: collected ${items.length} items`)}catch(e){state.runs.push({storeId:store.id,status:'error',message:e.message,startedAt,finishedAt:new Date().toISOString()});console.log(`${store.name}: ${e.message}`)}state.runs=state.runs.slice(-1000);state.history=state.history.slice(-100000);save(state);await new Promise(r=>setTimeout(r,1500))}}finally{try{fs.closeSync(fd)}catch{}try{fs.unlinkSync(LOCK)}catch{}}}
-run().catch(e=>{console.error(e);process.exitCode=1});
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+const stores = require('./stores.json');
+const DB = path.join(__dirname, 'db.json');
+const TIMEOUT = 12000;
+const USER_AGENT = 'Gjejma/1.1 (Albanian price comparison; https://github.com/FrenkliK/Gjejma)';
+
+function normalize(value = '') {
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function decode(value = '') {
+  return String(value).replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n))
+    .replace(/&#x([\da-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function parsePrice(value) {
+  if (value == null) return null;
+  const raw = String(value).replace(/[^\d.,]/g, '');
+  if (!raw) return null;
+  const normalized = raw.includes(',') && raw.includes('.')
+    ? raw.lastIndexOf(',') > raw.lastIndexOf('.') ? raw.replace(/\./g, '').replace(',', '.') : raw.replace(/,/g, '')
+    : (raw.match(/,/g) || []).length === 1 && raw.split(',')[1].length <= 2 ? raw.replace(',', '.') : raw.replace(/[,.]/g, '');
+  const number = Number(normalized);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+async function fetchText(address) {
+  const response = await fetch(address, {
+    signal: AbortSignal.timeout(TIMEOUT),
+    headers: { 'user-agent': USER_AGENT, accept: 'application/json,text/html;q=0.9,*/*;q=0.8' },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+}
+
+function productRow(store, { title, url, price, currency, availability, sku }) {
+  title = String(title || '').trim();
+  const amount = parsePrice(price);
+  if (!title || !url || !amount) return null;
+  let link;
+  try { link = new URL(url, `https://${store.domain}`); } catch { return null; }
+  if (link.hostname !== store.domain && !link.hostname.endsWith(`.${store.domain}`)) return null;
+  const stock = String(availability || '').toLowerCase();
+  const state = /out|unavailable|sold|false/.test(stock) ? 'out_of_stock'
+    : /instock|in stock|available|true/.test(stock) ? 'in_stock' : 'unknown';
+  return {
+    title, url: link.href, price: amount, currency: currency || store.currency || 'ALL',
+    availability: state, sku: String(sku || ''), storeId: store.id, store: store.name, domain: store.domain,
+    mark: store.name.split(/\s+/).map(part => part[0]).join('').slice(0, 3).toUpperCase(), checkedAt: new Date().toISOString(),
+  };
+}
+
+function fromWoo(raw, store) {
+  let rows;
+  try { rows = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(rows)) return [];
+  return rows.map(p => {
+    const prices = p.prices || {};
+    let amount = prices.price ?? p.sale_price ?? p.price ?? p.regular_price;
+    amount = parsePrice(amount);
+    if (amount && prices.price != null) amount /= 10 ** Number(prices.currency_minor_unit || 0);
+    return productRow(store, {
+      title: p.name || p.title, url: p.permalink || p.url, price: amount,
+      currency: prices.currency_code || p.currency || store.currency,
+      availability: p.stock_status || p.availability, sku: p.sku || p.id,
+    });
+  }).filter(Boolean);
+}
+
+function fromShopify(raw, store) {
+  let data;
+  try { data = JSON.parse(raw); } catch { return []; }
+  const products = data?.resources?.results?.products || data?.products || [];
+  return products.map(p => {
+    const variant = p.variants?.[0] || {};
+    return productRow(store, {
+      title: p.title, url: p.url || p.handle && `/products/${p.handle}`,
+      price: variant.price || p.price, currency: p.currency || store.currency,
+      availability: variant.available ? 'in_stock' : 'unknown', sku: variant.sku || p.id,
+    });
+  }).filter(Boolean);
+}
+
+function fromJsonLd(html, store) {
+  const output = [];
+  for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const root = JSON.parse(match[1]);
+      const nodes = Array.isArray(root) ? root : [...(root['@graph'] || []), root];
+      for (const node of nodes) {
+        const types = Array.isArray(node?.['@type']) ? node['@type'] : [node?.['@type']];
+        if (!types.includes('Product')) continue;
+        const offer = Array.isArray(node.offers) ? node.offers[0] : node.offers;
+        if (!offer) continue;
+        const row = productRow(store, {
+          title: node.name, url: node.url || offer.url, price: offer.price || offer.lowPrice,
+          currency: offer.priceCurrency, availability: offer.availability, sku: node.sku,
+        });
+        if (row) output.push(row);
+      }
+    } catch { /* Ignore malformed structured data on a page. */ }
+  }
+  return output;
+}
+
+function fromHtmlCards(html, store) {
+  const output = [];
+  const blocks = html.match(/<(?:article|li|div)\b[^>]*(?:product|item)[^>]*>[\s\S]*?<\/(?:article|li|div)>/gi) || [];
+  for (const block of blocks) {
+    const anchor = block.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/i);
+    const titleTag = block.match(/<(?:h2|h3|[^>]+(?:product-title|product_title|woocommerce-loop-product__title)[^>]*)[^>]*>([\s\S]*?)<\/(?:h2|h3|[^>]+)>/i);
+    const titleAttr = block.match(/(?:title|aria-label)=["']([^"']+)["']/i);
+    const priceMatch = block.match(/(?:woocommerce-Price-amount|price|amount)[^>]*>[\s\S]{0,100}?([\d][\d.,\s]*)/i);
+    const rawPrice = priceMatch?.[1] || block.match(/(?:ALL|Lek|L)\s*([\d][\d.,\s]*)/i)?.[1] || block.match(/([\d][\d.,\s]*)\s*(?:ALL|Lek|L)\b/i)?.[1];
+    const row = productRow(store, {
+      title: decode(titleTag?.[1] || titleAttr?.[1]), url: anchor?.[1], price: rawPrice,
+      availability: /out of stock|sold out|nuk ka stok/i.test(block) ? 'out_of_stock' : /in stock|ne stok/i.test(block) ? 'in_stock' : 'unknown',
+    });
+    if (row) output.push(row);
+  }
+  return output;
+}
+
+function queryMatches(title, query) {
+  const terms = normalize(query).split(/\s+/).filter(Boolean);
+  const normalizedTitle = normalize(title);
+  return terms.length > 0 && terms.every(term => normalizedTitle.includes(term));
+}
+
+async function searchStore(store, query) {
+  const encoded = encodeURIComponent(query);
+  const errors = [];
+  const attempts = [];
+  if (store.adapter === 'shopify') {
+    attempts.push({ url: `https://${store.domain}/search/suggest.json?q=${encoded}&resources[type]=product&resources[limit]=20`, parse: fromShopify });
+  }
+  attempts.push({ url: `https://${store.domain}/wp-json/wc/store/v1/products?search=${encoded}&per_page=30`, parse: fromWoo });
+  attempts.push({ url: `https://${store.domain}/?s=${encoded}&post_type=product`, parse: (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)] });
+  attempts.push({ url: `${store.url}${store.url.includes('?') ? '&' : '?'}s=${encoded}&post_type=product`, parse: (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)] });
+  attempts.push({ url: `https://${store.domain}/search?q=${encoded}`, parse: (body, s) => [...fromJsonLd(body, s), ...fromHtmlCards(body, s)] });
+
+  for (const attempt of attempts) {
+    try {
+      const body = await fetchText(attempt.url);
+      const found = attempt.parse(body, store).filter(row => queryMatches(row.title, query));
+      if (found.length) return { offers: found, error: null };
+    } catch (error) { errors.push(error.message || 'request failed'); }
+  }
+  const distinct = [...new Set(errors)];
+  return { offers: [], error: distinct.length ? distinct.join(', ') : 'No matching public product listing found' };
+}
+
+async function searchStores(query) {
+  const selected = stores.filter(store => store.enabled && store.country === 'AL');
+  const checkedAt = new Date().toISOString();
+  const outcomes = await Promise.all(selected.map(async store => {
+    try { return { store, ...(await searchStore(store, query)) }; }
+    catch (error) { return { store, offers: [], error: error.message || 'request failed' }; }
+  }));
+  const offers = outcomes.flatMap(outcome => outcome.offers);
+  const storeErrors = outcomes.filter(outcome => outcome.error).map(({ store, error }) => ({ id: store.id, name: store.name, error }));
+  offers.sort((a, b) => a.price - b.price);
+  return { query, total: offers.length, offers, storesChecked: selected.length, storesWithOffers: outcomes.filter(o => o.offers.length).length, storeErrors, checkedAt };
+}
+
+// Legacy opt-in catalogue collection remains available for maintainers. Normal searches never read or write this data.
+function legacyRead() { try { return JSON.parse(fs.readFileSync(DB, 'utf8')); } catch { return { products: [], offers: [], history: [], runs: [] }; } }
+function legacySave(state) { fs.writeFileSync(DB, JSON.stringify(state, null, 2)); }
+function id(value) { return crypto.createHash('sha1').update(value).digest('hex').slice(0, 16); }
+async function legacyCollect() {
+  const state = legacyRead();
+  for (const store of stores.filter(s => s.enabled && s.adapter === 'woocommerce')) {
+    try {
+      const raw = await fetchText(`https://${store.domain}/wp-json/wc/store/v1/products?per_page=100`);
+      for (const row of fromWoo(raw, store)) {
+        const productId = id(row.sku ? `${store.id}:${row.sku}` : `${store.id}:${row.url}`);
+        if (!state.products.some(p => p.id === productId)) state.products.push({ id: productId, title: row.title, model: row.title, updatedAt: row.checkedAt });
+        const offer = { id: id(`${productId}:${store.id}`), productId, ...row };
+        const previous = state.offers.findIndex(o => o.id === offer.id);
+        if (previous < 0) state.offers.push(offer); else state.offers[previous] = offer;
+      }
+      console.log(`${store.name}: legacy feed processed`);
+    } catch (error) { console.log(`${store.name}: ${error.message}`); }
+  }
+  legacySave(state);
+}
+
+if (require.main === module) legacyCollect().catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = { searchStores };
+

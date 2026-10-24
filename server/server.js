@@ -15,5 +15,7 @@ const app=http.createServer((req,res)=>{const u=new URL(req.url,`http://${req.he
 });
 let collectorRunning=false;
 function collectInBackground(){if(collectorRunning)return;collectorRunning=true;console.log('Starting optional legacy catalogue collection…');const child=spawn(process.execPath,[path.join(__dirname,'collector.js')],{cwd:path.resolve(__dirname,'..'),stdio:'inherit',env:process.env});child.on('error',e=>console.error('Could not start collector:',e.message));child.on('close',code=>{collectorRunning=false;console.log(`Optional collection finished (exit ${code}).`)})}
-app.listen(port,()=>{console.log(`Gjejma running at http://localhost:${port}`);if(process.env.AUTO_COLLECT==='true'){collectInBackground();let mins=Number(process.env.COLLECT_INTERVAL_MINUTES||360);if(!Number.isFinite(mins)||mins<5)mins=360;setInterval(collectInBackground,mins*60_000)}});
+const onListening=()=>{const address=httpServer.address(),actualPort=typeof address==='object'&&address?address.port:port;console.log(`Gjejma running at http://127.0.0.1:${actualPort}`);if(process.env.AUTO_COLLECT==='true'){collectInBackground();let mins=Number(process.env.COLLECT_INTERVAL_MINUTES||360);if(!Number.isFinite(mins)||mins<5)mins=360;setInterval(collectInBackground,mins*60_000)}};
+const httpServer=process.env.GJEJMA_DESKTOP==='true'?app.listen(port,'127.0.0.1',onListening):app.listen(port,onListening);
+module.exports={app,httpServer};
 
